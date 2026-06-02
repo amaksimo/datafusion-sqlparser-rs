@@ -311,6 +311,63 @@ fn parse_create_sequence() {
 }
 
 #[test]
+fn parse_create_sequence_clause_order_independent() {
+    // pg_dump emits options in an order that the original positional parser
+    // could not handle (START before INCREMENT). It must parse cleanly.
+    let pg_dump_sql = "CREATE SEQUENCE public.t_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1";
+    let canonical = "CREATE SEQUENCE public.t_id_seq AS INTEGER START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1";
+    match pg().one_statement_parses_to(pg_dump_sql, canonical) {
+        Statement::CreateSequence {
+            temporary,
+            if_not_exists,
+            name,
+            data_type,
+            sequence_options,
+            owned_by,
+        } => {
+            assert!(!temporary);
+            assert!(!if_not_exists);
+            assert_eq!(name.to_string(), "public.t_id_seq");
+            assert_eq!(data_type, Some(DataType::Integer(None)));
+            assert_eq!(owned_by, None);
+            let expected = vec![
+                SequenceOptions::StartWith(Expr::value(number("1")), true),
+                SequenceOptions::IncrementBy(Expr::value(number("1")), true),
+                SequenceOptions::MinValue(None),
+                SequenceOptions::MaxValue(None),
+                SequenceOptions::Cache(Expr::value(number("1"))),
+            ];
+            assert_eq!(sequence_options, expected);
+        }
+        other => panic!("expected CreateSequence, got {other:?}"),
+    }
+
+    // Two different orderings of the same logical sequence must produce the
+    // same *set* of options (vec order may legitimately differ).
+    fn options_of(sql: &str) -> Vec<SequenceOptions> {
+        match pg().verified_stmt(sql) {
+            Statement::CreateSequence {
+                mut sequence_options,
+                ..
+            } => {
+                sequence_options.sort();
+                sequence_options
+            }
+            other => panic!("expected CreateSequence, got {other:?}"),
+        }
+    }
+
+    let a = options_of("CREATE SEQUENCE s INCREMENT BY 2 START WITH 5 CACHE 1");
+    let b = options_of("CREATE SEQUENCE s CACHE 1 START WITH 5 INCREMENT BY 2");
+    assert_eq!(a, b);
+
+    // Regression: the original INCREMENT-first ordering must still round-trip.
+    pg().verified_stmt(
+        "CREATE SEQUENCE IF NOT EXISTS name2 AS BIGINT INCREMENT 1 MINVALUE 1 MAXVALUE 20 START WITH 10 CACHE 2 NO CYCLE",
+    );
+}
+
+#[test]
 fn parse_drop_sequence() {
     // SimpleLogger::new().init().unwrap();
     let sql1 = "DROP SEQUENCE IF EXISTS  name0 CASCADE";
