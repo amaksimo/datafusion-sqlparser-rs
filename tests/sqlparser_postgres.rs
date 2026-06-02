@@ -342,29 +342,66 @@ fn parse_create_sequence_clause_order_independent() {
         other => panic!("expected CreateSequence, got {other:?}"),
     }
 
-    // Two different orderings of the same logical sequence must produce the
-    // same *set* of options (vec order may legitimately differ).
+    // The parser preserves clause order in the AST vector (other sub-tests
+    // rely on this via `verified_stmt`). So two different orderings of the
+    // same logical sequence parse into *different* vectors, each matching the
+    // literal order it was written. The point here is that both orderings
+    // parse successfully into the order written.
     fn options_of(sql: &str) -> Vec<SequenceOptions> {
         match pg().verified_stmt(sql) {
             Statement::CreateSequence {
-                mut sequence_options,
-                ..
-            } => {
-                sequence_options.sort();
-                sequence_options
-            }
+                sequence_options, ..
+            } => sequence_options,
             other => panic!("expected CreateSequence, got {other:?}"),
         }
     }
 
     let a = options_of("CREATE SEQUENCE s INCREMENT BY 2 START WITH 5 CACHE 1");
+    assert_eq!(
+        a,
+        vec![
+            SequenceOptions::IncrementBy(Expr::value(number("2")), true),
+            SequenceOptions::StartWith(Expr::value(number("5")), true),
+            SequenceOptions::Cache(Expr::value(number("1"))),
+        ]
+    );
+
     let b = options_of("CREATE SEQUENCE s CACHE 1 START WITH 5 INCREMENT BY 2");
-    assert_eq!(a, b);
+    assert_eq!(
+        b,
+        vec![
+            SequenceOptions::Cache(Expr::value(number("1"))),
+            SequenceOptions::StartWith(Expr::value(number("5")), true),
+            SequenceOptions::IncrementBy(Expr::value(number("2")), true),
+        ]
+    );
 
     // Regression: the original INCREMENT-first ordering must still round-trip.
     pg().verified_stmt(
         "CREATE SEQUENCE IF NOT EXISTS name2 AS BIGINT INCREMENT 1 MINVALUE 1 MAXVALUE 20 START WITH 10 CACHE 2 NO CYCLE",
     );
+}
+
+#[test]
+fn parse_create_sequence_repeated_clause_kept() {
+    // Characterization test: the order-independent loop accepts repeated
+    // clauses and pushes each one. This documents current permissive behavior,
+    // not a requirement.
+    match pg().verified_stmt("CREATE SEQUENCE s INCREMENT 1 INCREMENT 2 CACHE 1") {
+        Statement::CreateSequence {
+            sequence_options, ..
+        } => {
+            assert_eq!(
+                sequence_options,
+                vec![
+                    SequenceOptions::IncrementBy(Expr::value(number("1")), false),
+                    SequenceOptions::IncrementBy(Expr::value(number("2")), false),
+                    SequenceOptions::Cache(Expr::value(number("1"))),
+                ]
+            );
+        }
+        other => panic!("expected CreateSequence, got {other:?}"),
+    }
 }
 
 #[test]
