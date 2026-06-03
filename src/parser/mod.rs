@@ -19805,6 +19805,7 @@ impl<'a> Parser<'a> {
         let mut sequence_options = vec![];
         // PostgreSQL allows these clauses in any order (e.g. pg_dump emits
         // `START` before `INCREMENT`), so loop until no clause matches.
+        // https://www.postgresql.org/docs/current/sql-createsequence.html
         loop {
             //[ INCREMENT [ BY ] increment ]
             if self.parse_keywords(&[Keyword::INCREMENT]) {
