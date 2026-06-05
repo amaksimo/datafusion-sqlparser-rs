@@ -9375,6 +9375,7 @@ impl<'a> Parser<'a> {
                     index_name: None,
                     index_type: None,
                     columns: vec![],
+                    include: vec![],
                     index_options: vec![],
                     characteristics,
                 }
@@ -9395,6 +9396,7 @@ impl<'a> Parser<'a> {
                     index_type_display,
                     index_type: None,
                     columns: vec![],
+                    include: vec![],
                     index_options: vec![],
                     characteristics,
                     nulls_distinct: NullsDistinctOption::None,
@@ -9411,6 +9413,7 @@ impl<'a> Parser<'a> {
                     index_name: None,
                     index_type: None,
                     columns: vec![],
+                    include: vec![],
                     index_options: vec![],
                     characteristics,
                 }
@@ -9838,6 +9841,7 @@ impl<'a> Parser<'a> {
                 let index_type = self.parse_optional_using_then_index_type()?;
 
                 let columns = self.parse_parenthesized_index_column_list()?;
+                let include = self.parse_optional_include_columns()?;
                 let index_options = self.parse_index_options()?;
                 let characteristics = self.parse_constraint_characteristics()?;
                 Ok(Some(
@@ -9847,6 +9851,7 @@ impl<'a> Parser<'a> {
                         index_type_display,
                         index_type,
                         columns,
+                        include,
                         index_options,
                         characteristics,
                         nulls_distinct,
@@ -9871,6 +9876,7 @@ impl<'a> Parser<'a> {
                 let index_type = self.parse_optional_using_then_index_type()?;
 
                 let columns = self.parse_parenthesized_index_column_list()?;
+                let include = self.parse_optional_include_columns()?;
                 let index_options = self.parse_index_options()?;
                 let characteristics = self.parse_constraint_characteristics()?;
                 Ok(Some(
@@ -9879,6 +9885,7 @@ impl<'a> Parser<'a> {
                         index_name,
                         index_type,
                         columns,
+                        include,
                         index_options,
                         characteristics,
                     }
@@ -10151,6 +10158,18 @@ impl<'a> Parser<'a> {
                 Some(index_option) => options.push(index_option),
                 None => return Ok(options),
             }
+        }
+    }
+
+    /// Parse an optional `INCLUDE (col, ...)` clause on a table constraint.
+    pub fn parse_optional_include_columns(&mut self) -> Result<Vec<Ident>, ParserError> {
+        if self.parse_keyword(Keyword::INCLUDE) {
+            self.expect_token(&Token::LParen)?;
+            let columns = self.parse_comma_separated(|p| p.parse_identifier())?;
+            self.expect_token(&Token::RParen)?;
+            Ok(columns)
+        } else {
+            Ok(vec![])
         }
     }
 
