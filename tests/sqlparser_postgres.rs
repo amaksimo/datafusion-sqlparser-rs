@@ -7214,7 +7214,12 @@ fn parse_alter_table_constraint_not_valid() {
 #[test]
 fn parse_alter_table_validate_constraint() {
     match pg_and_generic().verified_stmt("ALTER TABLE foo VALIDATE CONSTRAINT bar") {
-        Statement::AlterTable(AlterTable { operations, .. }) => {
+        Statement::AlterTable(AlterTable {
+            operations,
+            r#async,
+            ..
+        }) => {
+            assert!(!r#async);
             assert_eq!(
                 operations,
                 vec![AlterTableOperation::ValidateConstraint { name: "bar".into() }]
@@ -7222,6 +7227,32 @@ fn parse_alter_table_validate_constraint() {
         }
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn parse_alter_table_async_validate_constraint() {
+    // Aurora DSQL runs VALIDATE CONSTRAINT as an asynchronous DDL job via the
+    // `ALTER TABLE ASYNC` form.
+    match pg_and_generic().verified_stmt("ALTER TABLE ASYNC foo VALIDATE CONSTRAINT bar") {
+        Statement::AlterTable(AlterTable {
+            name,
+            operations,
+            r#async,
+            ..
+        }) => {
+            assert!(r#async);
+            assert_eq!(name.to_string(), "foo");
+            assert_eq!(
+                operations,
+                vec![AlterTableOperation::ValidateConstraint { name: "bar".into() }]
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    // ASYNC composes with IF EXISTS and ONLY.
+    pg_and_generic()
+        .verified_stmt("ALTER TABLE ASYNC IF EXISTS ONLY foo VALIDATE CONSTRAINT bar");
 }
 
 #[test]

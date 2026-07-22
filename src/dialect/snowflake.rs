@@ -744,6 +744,7 @@ fn parse_alter_dynamic_table(parser: &mut Parser) -> Result<Statement, ParserErr
 
     Ok(Statement::AlterTable(AlterTable {
         name: table_name,
+        r#async: false,
         if_exists: false,
         only: false,
         operations: vec![operation],
@@ -786,6 +787,7 @@ fn parse_alter_external_table(parser: &mut Parser) -> Result<Statement, ParserEr
 
     Ok(Statement::AlterTable(AlterTable {
         name: table_name,
+        r#async: false,
         if_exists,
         only: false,
         operations: vec![operation],
