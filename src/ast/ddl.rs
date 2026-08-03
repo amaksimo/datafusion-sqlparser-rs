@@ -4730,6 +4730,12 @@ pub struct AlterTable {
     /// Table name
     #[cfg_attr(feature = "visitor", visit(with = "visit_relation"))]
     pub name: ObjectName,
+    /// Whether the `ASYNC` keyword was specified ([DSQL]). `ALTER TABLE ASYNC`
+    /// runs the operation as an asynchronous DDL job, e.g.
+    /// `ALTER TABLE ASYNC t VALIDATE CONSTRAINT c`.
+    ///
+    /// [DSQL]: https://docs.aws.amazon.com/aurora-dsql/latest/userguide/working-with-postgresql-compatibility.html
+    pub r#async: bool,
     /// Whether `IF EXISTS` was specified for the `ALTER TABLE`.
     pub if_exists: bool,
     /// Whether the `ONLY` keyword was used (restrict scope to the named table).
@@ -4757,6 +4763,9 @@ impl fmt::Display for AlterTable {
             None => write!(f, "ALTER TABLE ")?,
         }
 
+        if self.r#async {
+            write!(f, "ASYNC ")?;
+        }
         if self.if_exists {
             write!(f, "IF EXISTS ")?;
         }

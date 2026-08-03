@@ -11111,6 +11111,7 @@ impl<'a> Parser<'a> {
 
     /// Parse a [Statement::AlterTable]
     pub fn parse_alter_table(&mut self, iceberg: bool) -> Result<Statement, ParserError> {
+        let r#async = self.parse_keyword(Keyword::ASYNC); // [ ASYNC ] (DSQL)
         let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
         let only = self.parse_keyword(Keyword::ONLY); // [ ONLY ]
         let table_name = self.parse_object_name(false)?;
@@ -11138,6 +11139,7 @@ impl<'a> Parser<'a> {
 
         Ok(AlterTable {
             name: table_name,
+            r#async,
             if_exists,
             only,
             operations,
