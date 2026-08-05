@@ -1086,6 +1086,31 @@ fn parse_alter_table_alter_column() {
 }
 
 #[test]
+fn parse_alter_table_alter_column_set_storage() {
+    for storage in ["PLAIN", "EXTERNAL", "EXTENDED", "MAIN", "DEFAULT"] {
+        pg_and_generic().verified_stmt(&format!(
+            "ALTER TABLE tab ALTER COLUMN payload SET STORAGE {storage}"
+        ));
+    }
+
+    match alter_table_op(pg().one_statement_parses_to(
+        "ALTER TABLE tab ALTER payload SET STORAGE DEFAULT",
+        "ALTER TABLE tab ALTER COLUMN payload SET STORAGE DEFAULT",
+    )) {
+        AlterTableOperation::AlterColumn { column_name, op } => {
+            assert_eq!("payload", column_name.to_string());
+            assert_eq!(
+                op,
+                AlterColumnOperation::SetStorage {
+                    storage: AlterColumnStorage::Default,
+                }
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_alter_table_alter_column_add_generated() {
     pg_and_generic()
         .verified_stmt("ALTER TABLE t ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY");
@@ -2505,7 +2530,7 @@ fn parse_pg_unary_ops() {
         ("@", UnaryOperator::PGAbs),
     ];
     for (str_op, op) in pg_unary_ops {
-        let select = pg().verified_only_select(&format!("SELECT {}a", &str_op));
+        let select = pg().verified_only_select(&format!("SELECT {}a", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: *op,
@@ -2521,7 +2546,7 @@ fn parse_pg_postfix_factorial() {
     let postfix_factorial = &[("!", UnaryOperator::PGPostfixFactorial)];
 
     for (str_op, op) in postfix_factorial {
-        let select = pg().verified_only_select(&format!("SELECT a{}", &str_op));
+        let select = pg().verified_only_select(&format!("SELECT a{}", str_op));
         assert_eq!(
             SelectItem::UnnamedExpr(Expr::UnaryOp {
                 op: *op,
@@ -7251,8 +7276,7 @@ fn parse_alter_table_async_validate_constraint() {
     }
 
     // ASYNC composes with IF EXISTS and ONLY.
-    pg_and_generic()
-        .verified_stmt("ALTER TABLE ASYNC IF EXISTS ONLY foo VALIDATE CONSTRAINT bar");
+    pg_and_generic().verified_stmt("ALTER TABLE ASYNC IF EXISTS ONLY foo VALIDATE CONSTRAINT bar");
 }
 
 #[test]

@@ -4744,7 +4744,7 @@ impl<'a> Parser<'a> {
         if self.parse_keyword(expected) {
             Ok(self.get_current_token().clone())
         } else {
-            self.expected_ref(format!("{:?}", &expected).as_str(), self.peek_token_ref())
+            self.expected_ref(format!("{:?}", expected).as_str(), self.peek_token_ref())
         }
     }
 
@@ -4757,7 +4757,7 @@ impl<'a> Parser<'a> {
         if self.parse_keyword(expected) {
             Ok(())
         } else {
-            self.expected_ref(format!("{:?}", &expected).as_str(), self.peek_token_ref())
+            self.expected_ref(format!("{:?}", expected).as_str(), self.peek_token_ref())
         }
     }
 
@@ -10611,6 +10611,27 @@ impl<'a> Parser<'a> {
                 }
             } else if self.parse_keywords(&[Keyword::DROP, Keyword::DEFAULT]) {
                 AlterColumnOperation::DropDefault {}
+            } else if self.parse_keywords(&[Keyword::SET, Keyword::STORAGE]) {
+                let storage = match self.parse_one_of_keywords(&[
+                    Keyword::PLAIN,
+                    Keyword::EXTERNAL,
+                    Keyword::EXTENDED,
+                    Keyword::MAIN,
+                    Keyword::DEFAULT,
+                ]) {
+                    Some(Keyword::PLAIN) => AlterColumnStorage::Plain,
+                    Some(Keyword::EXTERNAL) => AlterColumnStorage::External,
+                    Some(Keyword::EXTENDED) => AlterColumnStorage::Extended,
+                    Some(Keyword::MAIN) => AlterColumnStorage::Main,
+                    Some(Keyword::DEFAULT) => AlterColumnStorage::Default,
+                    _ => {
+                        return self.expected_ref(
+                            "storage value (PLAIN, EXTERNAL, EXTENDED, MAIN, or DEFAULT)",
+                            self.peek_token_ref(),
+                        )
+                    }
+                };
+                AlterColumnOperation::SetStorage { storage }
             } else if self.parse_keywords(&[Keyword::SET, Keyword::DATA, Keyword::TYPE]) {
                 self.parse_set_data_type(true)?
             } else if self.parse_keyword(Keyword::TYPE) {
@@ -10640,9 +10661,9 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 let message = if is_postgresql {
-                    "SET/DROP NOT NULL, SET DEFAULT, SET DATA TYPE, or ADD GENERATED after ALTER COLUMN"
+                    "SET/DROP NOT NULL, SET DEFAULT, SET STORAGE, SET DATA TYPE, or ADD GENERATED after ALTER COLUMN"
                 } else {
-                    "SET/DROP NOT NULL, SET DEFAULT, or SET DATA TYPE after ALTER COLUMN"
+                    "SET/DROP NOT NULL, SET DEFAULT, SET STORAGE, or SET DATA TYPE after ALTER COLUMN"
                 };
 
                 return self.expected_ref(message, self.peek_token_ref());
@@ -13437,7 +13458,7 @@ impl<'a> Parser<'a> {
                 }
                 Token::EOF => break,
                 token => {
-                    return Err(ParserError::ParserError(format!(
+                    Err(ParserError::ParserError(format!(
                         "Unexpected token in identifier: {token}"
                     )))?;
                 }
@@ -16696,7 +16717,7 @@ impl<'a> Parser<'a> {
                 where_clause = Some(self.parse_expr()?);
             } else {
                 let tok = self.peek_token_ref();
-                return parser_err!(
+                parser_err!(
                     format!(
                         "Expected one of DIMENSIONS, METRICS, FACTS or WHERE, got {}",
                         tok.token

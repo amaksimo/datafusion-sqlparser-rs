@@ -23,7 +23,7 @@ authors = ["Dandandan <danielheres@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-sqlparser = { path = "../" }
+sqlparser = { package = "sqlparser-dsql", path = "../" }
 
 [dev-dependencies]
 criterion = "0.8"

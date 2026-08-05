@@ -1278,6 +1278,11 @@ pub enum AlterColumnOperation {
     },
     /// `DROP DEFAULT`
     DropDefault,
+    /// `SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN | DEFAULT }`
+    SetStorage {
+        /// PostgreSQL column storage strategy.
+        storage: AlterColumnStorage,
+    },
     /// `[SET DATA] TYPE <data_type> [USING <expr>]`
     SetDataType {
         /// Target data type for the column.
@@ -1309,6 +1314,9 @@ impl fmt::Display for AlterColumnOperation {
             }
             AlterColumnOperation::DropDefault => {
                 write!(f, "DROP DEFAULT")
+            }
+            AlterColumnOperation::SetStorage { storage } => {
+                write!(f, "SET STORAGE {storage}")
             }
             AlterColumnOperation::SetDataType {
                 data_type,
@@ -1346,6 +1354,35 @@ impl fmt::Display for AlterColumnOperation {
                 }
                 Ok(())
             }
+        }
+    }
+}
+
+/// PostgreSQL column storage strategy used by `ALTER COLUMN ... SET STORAGE`.
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterColumnStorage {
+    /// No compression or out-of-line storage.
+    Plain,
+    /// Out-of-line storage without compression.
+    External,
+    /// Compression and out-of-line storage.
+    Extended,
+    /// Compression with a preference for in-line storage.
+    Main,
+    /// Reset to the data type's default storage strategy.
+    Default,
+}
+
+impl fmt::Display for AlterColumnStorage {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            AlterColumnStorage::Plain => write!(f, "PLAIN"),
+            AlterColumnStorage::External => write!(f, "EXTERNAL"),
+            AlterColumnStorage::Extended => write!(f, "EXTENDED"),
+            AlterColumnStorage::Main => write!(f, "MAIN"),
+            AlterColumnStorage::Default => write!(f, "DEFAULT"),
         }
     }
 }
@@ -4772,7 +4809,7 @@ impl fmt::Display for AlterTable {
         if self.only {
             write!(f, "ONLY ")?;
         }
-        write!(f, "{} ", &self.name)?;
+        write!(f, "{} ", self.name)?;
         if let Some(cluster) = &self.on_cluster {
             write!(f, "ON CLUSTER {cluster} ")?;
         }

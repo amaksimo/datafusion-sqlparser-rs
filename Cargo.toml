@@ -17,8 +17,8 @@
 
 [package]
 name = "sqlparser-dsql"
-description = "SQL parser fork with Aurora DSQL extensions (CREATE INDEX ASYNC, ALTER TABLE ASYNC, order-independent CREATE SEQUENCE, INCLUDE on table constraints). Based on sqlparser 0.62.0."
-version = "0.62.2"
+description = "SQL parser fork with Aurora DSQL extensions (CREATE INDEX ASYNC, ALTER TABLE ASYNC, ALTER COLUMN SET STORAGE, order-independent CREATE SEQUENCE, INCLUDE on table constraints). Based on sqlparser 0.62.0."
+version = "0.62.3"
 authors = [
     "Apache DataFusion <dev@datafusion.apache.org>",
     "Amazon Web Services",
