@@ -891,6 +891,7 @@ impl Spanned for Analyze {
 /// - [AlterColumnOperation::SetNotNull]
 /// - [AlterColumnOperation::DropNotNull]
 /// - [AlterColumnOperation::DropDefault]
+/// - [AlterColumnOperation::SetStorage]
 /// - [AlterColumnOperation::AddGenerated]
 impl Spanned for AlterColumnOperation {
     fn span(&self) -> Span {
@@ -899,6 +900,7 @@ impl Spanned for AlterColumnOperation {
             AlterColumnOperation::DropNotNull => Span::empty(),
             AlterColumnOperation::SetDefault { value } => value.span(),
             AlterColumnOperation::DropDefault => Span::empty(),
+            AlterColumnOperation::SetStorage { .. } => Span::empty(),
             AlterColumnOperation::SetDataType {
                 data_type: _,
                 using,
