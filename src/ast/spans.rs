@@ -814,6 +814,7 @@ impl Spanned for RaiseStatementValue {
 /// Missing spans:
 /// - [ColumnOption::Null]
 /// - [ColumnOption::NotNull]
+/// - [ColumnOption::Storage]
 /// - [ColumnOption::Comment]
 /// - [ColumnOption::PrimaryKey]
 /// - [ColumnOption::Unique]
@@ -825,6 +826,7 @@ impl Spanned for ColumnOption {
             ColumnOption::Null => Span::empty(),
             ColumnOption::NotNull => Span::empty(),
             ColumnOption::Default(expr) => expr.span(),
+            ColumnOption::Storage(_) => Span::empty(),
             ColumnOption::Materialized(expr) => expr.span(),
             ColumnOption::Ephemeral(expr) => expr.as_ref().map_or(Span::empty(), |e| e.span()),
             ColumnOption::Alias(expr) => expr.span(),
