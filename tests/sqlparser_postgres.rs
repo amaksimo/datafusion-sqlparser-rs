@@ -1111,6 +1111,30 @@ fn parse_alter_table_alter_column_set_storage() {
 }
 
 #[test]
+fn parse_create_table_column_storage() {
+    for (storage, expected) in [
+        ("PLAIN", AlterColumnStorage::Plain),
+        ("EXTERNAL", AlterColumnStorage::External),
+        ("EXTENDED", AlterColumnStorage::Extended),
+        ("MAIN", AlterColumnStorage::Main),
+        ("DEFAULT", AlterColumnStorage::Default),
+    ] {
+        let sql = format!("CREATE TABLE tab (payload TEXT STORAGE {storage})");
+        let statement = pg_and_generic().verified_stmt(&sql);
+
+        match statement {
+            Statement::CreateTable(CreateTable { columns, .. }) => {
+                assert_eq!(
+                    columns[0].options[0].option,
+                    ColumnOption::Storage(expected)
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn parse_alter_table_alter_column_add_generated() {
     pg_and_generic()
         .verified_stmt("ALTER TABLE t ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY");

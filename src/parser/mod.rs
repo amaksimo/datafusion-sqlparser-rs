@@ -9349,6 +9349,10 @@ impl<'a> Parser<'a> {
             Ok(Some(ColumnOption::Null))
         } else if self.parse_keyword(Keyword::DEFAULT) {
             Ok(Some(ColumnOption::Default(self.parse_expr()?)))
+        } else if dialect_of!(self is PostgreSqlDialect | GenericDialect)
+            && self.parse_keyword(Keyword::STORAGE)
+        {
+            Ok(Some(ColumnOption::Storage(self.parse_column_storage()?)))
         } else if dialect_of!(self is ClickHouseDialect| GenericDialect)
             && self.parse_keyword(Keyword::MATERIALIZED)
         {
@@ -10612,25 +10616,7 @@ impl<'a> Parser<'a> {
             } else if self.parse_keywords(&[Keyword::DROP, Keyword::DEFAULT]) {
                 AlterColumnOperation::DropDefault {}
             } else if self.parse_keywords(&[Keyword::SET, Keyword::STORAGE]) {
-                let storage = match self.parse_one_of_keywords(&[
-                    Keyword::PLAIN,
-                    Keyword::EXTERNAL,
-                    Keyword::EXTENDED,
-                    Keyword::MAIN,
-                    Keyword::DEFAULT,
-                ]) {
-                    Some(Keyword::PLAIN) => AlterColumnStorage::Plain,
-                    Some(Keyword::EXTERNAL) => AlterColumnStorage::External,
-                    Some(Keyword::EXTENDED) => AlterColumnStorage::Extended,
-                    Some(Keyword::MAIN) => AlterColumnStorage::Main,
-                    Some(Keyword::DEFAULT) => AlterColumnStorage::Default,
-                    _ => {
-                        return self.expected_ref(
-                            "storage value (PLAIN, EXTERNAL, EXTENDED, MAIN, or DEFAULT)",
-                            self.peek_token_ref(),
-                        )
-                    }
-                };
+                let storage = self.parse_column_storage()?;
                 AlterColumnOperation::SetStorage { storage }
             } else if self.parse_keywords(&[Keyword::SET, Keyword::DATA, Keyword::TYPE]) {
                 self.parse_set_data_type(true)?
@@ -10807,6 +10793,26 @@ impl<'a> Parser<'a> {
             }
         };
         Ok(operation)
+    }
+
+    fn parse_column_storage(&mut self) -> Result<AlterColumnStorage, ParserError> {
+        match self.parse_one_of_keywords(&[
+            Keyword::PLAIN,
+            Keyword::EXTERNAL,
+            Keyword::EXTENDED,
+            Keyword::MAIN,
+            Keyword::DEFAULT,
+        ]) {
+            Some(Keyword::PLAIN) => Ok(AlterColumnStorage::Plain),
+            Some(Keyword::EXTERNAL) => Ok(AlterColumnStorage::External),
+            Some(Keyword::EXTENDED) => Ok(AlterColumnStorage::Extended),
+            Some(Keyword::MAIN) => Ok(AlterColumnStorage::Main),
+            Some(Keyword::DEFAULT) => Ok(AlterColumnStorage::Default),
+            _ => self.expected_ref(
+                "storage value (PLAIN, EXTERNAL, EXTENDED, MAIN, or DEFAULT)",
+                self.peek_token_ref(),
+            ),
+        }
     }
 
     fn parse_set_data_type(&mut self, had_set: bool) -> Result<AlterColumnOperation, ParserError> {

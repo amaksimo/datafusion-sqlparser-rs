@@ -1358,7 +1358,7 @@ impl fmt::Display for AlterColumnOperation {
     }
 }
 
-/// PostgreSQL column storage strategy used by `ALTER COLUMN ... SET STORAGE`.
+/// PostgreSQL column storage strategy.
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
@@ -1935,6 +1935,8 @@ pub enum ColumnOption {
     NotNull,
     /// `DEFAULT <restricted-expr>`
     Default(Expr),
+    /// `STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN | DEFAULT }`
+    Storage(AlterColumnStorage),
 
     /// `MATERIALIZE <expr>`
     /// Syntax: `b INT MATERIALIZE (a + 1)`
@@ -2070,6 +2072,7 @@ impl fmt::Display for ColumnOption {
             Null => write!(f, "NULL"),
             NotNull => write!(f, "NOT NULL"),
             Default(expr) => write!(f, "DEFAULT {expr}"),
+            Storage(storage) => write!(f, "STORAGE {storage}"),
             Materialized(expr) => write!(f, "MATERIALIZED {expr}"),
             Ephemeral(expr) => {
                 if let Some(e) = expr {
