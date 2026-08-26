@@ -1278,6 +1278,16 @@ pub enum AlterColumnOperation {
     },
     /// `DROP DEFAULT`
     DropDefault,
+    /// `DROP IDENTITY [ IF EXISTS ]`
+    DropIdentity {
+        /// Whether `IF EXISTS` was specified.
+        if_exists: bool,
+    },
+    /// `DROP EXPRESSION [ IF EXISTS ]`
+    DropExpression {
+        /// Whether `IF EXISTS` was specified.
+        if_exists: bool,
+    },
     /// `SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN | DEFAULT }`
     SetStorage {
         /// PostgreSQL column storage strategy.
@@ -1314,6 +1324,20 @@ impl fmt::Display for AlterColumnOperation {
             }
             AlterColumnOperation::DropDefault => {
                 write!(f, "DROP DEFAULT")
+            }
+            AlterColumnOperation::DropIdentity { if_exists } => {
+                write!(f, "DROP IDENTITY")?;
+                if *if_exists {
+                    write!(f, " IF EXISTS")?;
+                }
+                Ok(())
+            }
+            AlterColumnOperation::DropExpression { if_exists } => {
+                write!(f, "DROP EXPRESSION")?;
+                if *if_exists {
+                    write!(f, " IF EXISTS")?;
+                }
+                Ok(())
             }
             AlterColumnOperation::SetStorage { storage } => {
                 write!(f, "SET STORAGE {storage}")

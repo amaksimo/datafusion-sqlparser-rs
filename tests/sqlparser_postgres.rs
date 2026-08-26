@@ -1111,6 +1111,24 @@ fn parse_alter_table_alter_column_set_storage() {
 }
 
 #[test]
+fn parse_alter_table_alter_column_drop_identity() {
+    for suffix in ["", " IF EXISTS"] {
+        pg_and_generic().verified_stmt(&format!(
+            "ALTER TABLE tab ALTER COLUMN id DROP IDENTITY{suffix}"
+        ));
+    }
+}
+
+#[test]
+fn parse_alter_table_alter_column_drop_expression() {
+    for suffix in ["", " IF EXISTS"] {
+        pg_and_generic().verified_stmt(&format!(
+            "ALTER TABLE tab ALTER COLUMN generated_value DROP EXPRESSION{suffix}"
+        ));
+    }
+}
+
+#[test]
 fn parse_create_table_column_storage() {
     for (storage, expected) in [
         ("PLAIN", AlterColumnStorage::Plain),

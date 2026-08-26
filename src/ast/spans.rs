@@ -893,6 +893,8 @@ impl Spanned for Analyze {
 /// - [AlterColumnOperation::SetNotNull]
 /// - [AlterColumnOperation::DropNotNull]
 /// - [AlterColumnOperation::DropDefault]
+/// - [AlterColumnOperation::DropIdentity]
+/// - [AlterColumnOperation::DropExpression]
 /// - [AlterColumnOperation::SetStorage]
 /// - [AlterColumnOperation::AddGenerated]
 impl Spanned for AlterColumnOperation {
@@ -902,6 +904,8 @@ impl Spanned for AlterColumnOperation {
             AlterColumnOperation::DropNotNull => Span::empty(),
             AlterColumnOperation::SetDefault { value } => value.span(),
             AlterColumnOperation::DropDefault => Span::empty(),
+            AlterColumnOperation::DropIdentity { .. } => Span::empty(),
+            AlterColumnOperation::DropExpression { .. } => Span::empty(),
             AlterColumnOperation::SetStorage { .. } => Span::empty(),
             AlterColumnOperation::SetDataType {
                 data_type: _,
