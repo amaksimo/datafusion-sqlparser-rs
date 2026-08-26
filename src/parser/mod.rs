@@ -10615,6 +10615,14 @@ impl<'a> Parser<'a> {
                 }
             } else if self.parse_keywords(&[Keyword::DROP, Keyword::DEFAULT]) {
                 AlterColumnOperation::DropDefault {}
+            } else if self.parse_keywords(&[Keyword::DROP, Keyword::IDENTITY]) {
+                AlterColumnOperation::DropIdentity {
+                    if_exists: self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]),
+                }
+            } else if self.parse_keywords(&[Keyword::DROP, Keyword::EXPRESSION]) {
+                AlterColumnOperation::DropExpression {
+                    if_exists: self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]),
+                }
             } else if self.parse_keywords(&[Keyword::SET, Keyword::STORAGE]) {
                 let storage = self.parse_column_storage()?;
                 AlterColumnOperation::SetStorage { storage }
@@ -10647,9 +10655,9 @@ impl<'a> Parser<'a> {
                 }
             } else {
                 let message = if is_postgresql {
-                    "SET/DROP NOT NULL, SET DEFAULT, SET STORAGE, SET DATA TYPE, or ADD GENERATED after ALTER COLUMN"
+                    "SET/DROP NOT NULL, SET/DROP DEFAULT, DROP IDENTITY, DROP EXPRESSION, SET STORAGE, SET DATA TYPE, or ADD GENERATED after ALTER COLUMN"
                 } else {
-                    "SET/DROP NOT NULL, SET DEFAULT, SET STORAGE, or SET DATA TYPE after ALTER COLUMN"
+                    "SET/DROP NOT NULL, SET/DROP DEFAULT, DROP IDENTITY, DROP EXPRESSION, SET STORAGE, or SET DATA TYPE after ALTER COLUMN"
                 };
 
                 return self.expected_ref(message, self.peek_token_ref());
