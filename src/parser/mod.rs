@@ -10623,6 +10623,12 @@ impl<'a> Parser<'a> {
                     self.peek_token_ref(),
                 );
             };
+            if characteristics.enforced.is_some() {
+                return self.expected_ref(
+                    "DEFERRABLE, NOT DEFERRABLE, or INITIALLY after ALTER CONSTRAINT",
+                    self.peek_token_ref(),
+                );
+            }
             AlterTableOperation::AlterConstraint {
                 name,
                 characteristics,

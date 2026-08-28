@@ -7303,6 +7303,10 @@ fn parse_alter_table_alter_constraint() {
     pg().verified_stmt(
         "ALTER TABLE IF EXISTS ONLY public.child * ALTER CONSTRAINT child_parent_fkey INITIALLY DEFERRED",
     );
+
+    assert!(pg()
+        .parse_sql_statements("ALTER TABLE child ALTER CONSTRAINT child_parent_fkey ENFORCED")
+        .is_err());
 }
 
 #[test]
