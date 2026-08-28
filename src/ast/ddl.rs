@@ -4817,6 +4817,8 @@ pub struct AlterTable {
     pub if_exists: bool,
     /// Whether the `ONLY` keyword was used (restrict scope to the named table).
     pub only: bool,
+    /// PostgreSQL-specific asterisk after the table name.
+    pub has_asterisk: bool,
     /// List of `ALTER TABLE` operations to apply.
     pub operations: Vec<AlterTableOperation>,
     /// Optional Hive `SET LOCATION` clause for the alter operation.
@@ -4849,7 +4851,11 @@ impl fmt::Display for AlterTable {
         if self.only {
             write!(f, "ONLY ")?;
         }
-        write!(f, "{} ", self.name)?;
+        write!(f, "{}", self.name)?;
+        if self.has_asterisk {
+            write!(f, " *")?;
+        }
+        write!(f, " ")?;
         if let Some(cluster) = &self.on_cluster {
             write!(f, "ON CLUSTER {cluster} ")?;
         }

@@ -11186,6 +11186,8 @@ impl<'a> Parser<'a> {
         let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
         let only = self.parse_keyword(Keyword::ONLY); // [ ONLY ]
         let table_name = self.parse_object_name(false)?;
+        let has_asterisk = dialect_of!(self is PostgreSqlDialect | GenericDialect)
+            && self.consume_token(&Token::Mul);
         let on_cluster = self.parse_optional_on_cluster()?;
         let operations = self.parse_comma_separated(Parser::parse_alter_table_operation)?;
 
@@ -11213,6 +11215,7 @@ impl<'a> Parser<'a> {
             r#async,
             if_exists,
             only,
+            has_asterisk,
             operations,
             location,
             on_cluster,

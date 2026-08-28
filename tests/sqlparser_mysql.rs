@@ -2901,6 +2901,7 @@ fn parse_alter_table_add_column() {
             name,
             if_exists,
             only,
+            has_asterisk: _,
             operations,
             table_type,
             location: _,
