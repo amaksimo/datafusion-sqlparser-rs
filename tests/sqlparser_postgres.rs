@@ -7265,12 +7265,35 @@ fn parse_alter_table_constraint_not_valid() {
                         foreign_table: ObjectName::from(vec!["other".into()]),
                         referred_columns: vec!["ref".into()],
                         on_delete: None,
+                        on_delete_columns: vec![],
                         on_update: None,
                         match_kind: None,
                         characteristics: None,
                     }
                     .into(),
                     not_valid: true,
+                }]
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_alter_table_alter_constraint() {
+    match pg().verified_stmt(
+        "ALTER TABLE child ALTER CONSTRAINT child_parent_fkey DEFERRABLE INITIALLY DEFERRED",
+    ) {
+        Statement::AlterTable(AlterTable { operations, .. }) => {
+            assert_eq!(
+                operations,
+                vec![AlterTableOperation::AlterConstraint {
+                    name: "child_parent_fkey".into(),
+                    characteristics: ConstraintCharacteristics {
+                        deferrable: Some(true),
+                        initially: Some(DeferrableInitial::Deferred),
+                        enforced: None,
+                    },
                 }]
             );
         }
@@ -7485,6 +7508,49 @@ fn parse_foreign_key_match_with_actions() {
     let sql = "CREATE TABLE orders (order_id INT REFERENCES another_table (id) MATCH FULL ON DELETE CASCADE ON UPDATE RESTRICT, customer_id INT, CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customers(customer_id) MATCH SIMPLE ON DELETE SET NULL ON UPDATE CASCADE)";
 
     pg_and_generic().verified_stmt(sql);
+}
+
+#[test]
+fn parse_foreign_key_set_action_columns() {
+    match pg().verified_stmt(
+        "CREATE TABLE child (tenant_id INT, parent_id INT, FOREIGN KEY (tenant_id, parent_id) REFERENCES parent(tenant_id, id) ON DELETE SET NULL (parent_id), FOREIGN KEY (tenant_id, parent_id) REFERENCES fallback_parent(tenant_id, id) ON DELETE SET DEFAULT (parent_id))",
+    ) {
+        Statement::CreateTable(CreateTable { constraints, .. }) => {
+            let TableConstraint::ForeignKey(set_null) = &constraints[0] else {
+                panic!("expected table foreign key");
+            };
+            assert_eq!(set_null.on_delete, Some(ReferentialAction::SetNull));
+            assert_eq!(set_null.on_delete_columns, vec![Ident::new("parent_id")]);
+
+            let TableConstraint::ForeignKey(set_default) = &constraints[1] else {
+                panic!("expected table foreign key");
+            };
+            assert_eq!(set_default.on_delete, Some(ReferentialAction::SetDefault));
+            assert_eq!(set_default.on_delete_columns, vec![Ident::new("parent_id")]);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_set_constraints() {
+    assert_eq!(
+        pg().verified_stmt("SET CONSTRAINTS ALL DEFERRED"),
+        Statement::Set(Set::SetConstraints {
+            constraints: None,
+            deferred: true,
+        })
+    );
+    assert_eq!(
+        pg().verified_stmt("SET CONSTRAINTS child_parent_fkey, public.audit_fkey IMMEDIATE"),
+        Statement::Set(Set::SetConstraints {
+            constraints: Some(vec![
+                ObjectName::from(vec![Ident::new("child_parent_fkey")]),
+                ObjectName::from(vec![Ident::new("public"), Ident::new("audit_fkey")]),
+            ]),
+            deferred: false,
+        })
+    );
 }
 
 #[test]

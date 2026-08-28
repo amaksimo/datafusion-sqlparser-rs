@@ -9456,6 +9456,7 @@ impl<'a> Parser<'a> {
                     foreign_table,
                     referred_columns,
                     on_delete,
+                    on_delete_columns: vec![],
                     on_update,
                     match_kind,
                     characteristics,
@@ -9728,6 +9729,22 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn parse_referential_action_with_columns(
+        &mut self,
+    ) -> Result<(ReferentialAction, Vec<Ident>), ParserError> {
+        let action = self.parse_referential_action()?;
+        let columns = if dialect_of!(self is PostgreSqlDialect | GenericDialect)
+            && matches!(
+                action,
+                ReferentialAction::SetNull | ReferentialAction::SetDefault
+            ) {
+            self.parse_parenthesized_column_list(Optional, false)?
+        } else {
+            vec![]
+        };
+        Ok((action, columns))
+    }
+
     /// Parse a `MATCH` kind for constraint references: `FULL`, `PARTIAL`, or `SIMPLE`.
     pub fn parse_match_kind(&mut self) -> Result<ConstraintReferenceMatchKind, ParserError> {
         if self.parse_keyword(Keyword::FULL) {
@@ -9905,6 +9922,7 @@ impl<'a> Parser<'a> {
                 let referred_columns = self.parse_parenthesized_column_list(Optional, false)?;
                 let mut match_kind = None;
                 let mut on_delete = None;
+                let mut on_delete_columns = vec![];
                 let mut on_update = None;
                 loop {
                     if match_kind.is_none() && self.parse_keyword(Keyword::MATCH) {
@@ -9912,7 +9930,10 @@ impl<'a> Parser<'a> {
                     } else if on_delete.is_none()
                         && self.parse_keywords(&[Keyword::ON, Keyword::DELETE])
                     {
-                        on_delete = Some(self.parse_referential_action()?);
+                        let (action, action_columns) =
+                            self.parse_referential_action_with_columns()?;
+                        on_delete = Some(action);
+                        on_delete_columns = action_columns;
                     } else if on_update.is_none()
                         && self.parse_keywords(&[Keyword::ON, Keyword::UPDATE])
                     {
@@ -9932,6 +9953,7 @@ impl<'a> Parser<'a> {
                         foreign_table,
                         referred_columns,
                         on_delete,
+                        on_delete_columns,
                         on_update,
                         match_kind,
                         characteristics,
@@ -10590,6 +10612,20 @@ impl<'a> Parser<'a> {
                 data_type,
                 options,
                 column_position,
+            }
+        } else if dialect_of!(self is PostgreSqlDialect | GenericDialect)
+            && self.parse_keywords(&[Keyword::ALTER, Keyword::CONSTRAINT])
+        {
+            let name = self.parse_identifier()?;
+            let Some(characteristics) = self.parse_constraint_characteristics()? else {
+                return self.expected_ref(
+                    "DEFERRABLE, NOT DEFERRABLE, or INITIALLY after ALTER CONSTRAINT",
+                    self.peek_token_ref(),
+                );
+            };
+            AlterTableOperation::AlterConstraint {
+                name,
+                characteristics,
             }
         } else if self.parse_keyword(Keyword::ALTER) {
             if self.peek_keyword(Keyword::SORTKEY) {
@@ -15365,6 +15401,26 @@ impl<'a> Parser<'a> {
 
         if hivevar {
             self.expect_token(&Token::Colon)?;
+        }
+
+        if scope.is_none() && self.parse_keyword(Keyword::CONSTRAINTS) {
+            let constraints = if self.parse_keyword(Keyword::ALL) {
+                None
+            } else {
+                Some(self.parse_comma_separated(|parser| parser.parse_object_name(false))?)
+            };
+            let deferred = if self.parse_keyword(Keyword::DEFERRED) {
+                true
+            } else if self.parse_keyword(Keyword::IMMEDIATE) {
+                false
+            } else {
+                return self.expected_ref("DEFERRED or IMMEDIATE", self.peek_token_ref());
+            };
+            return Ok(Set::SetConstraints {
+                constraints,
+                deferred,
+            }
+            .into());
         }
 
         if let Some(set_role_stmt) = self.maybe_parse(|parser| parser.parse_set_role(scope))? {

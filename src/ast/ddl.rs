@@ -132,6 +132,13 @@ pub enum AlterTableOperation {
         /// Whether the constraint should be marked `NOT VALID`.
         not_valid: bool,
     },
+    /// `ALTER CONSTRAINT <name> <constraint_characteristics>`
+    AlterConstraint {
+        /// Name of the constraint to alter.
+        name: Ident,
+        /// Updated constraint characteristics.
+        characteristics: ConstraintCharacteristics,
+    },
     /// `ADD [COLUMN] [IF NOT EXISTS] <column_def>`
     AddColumn {
         /// `[COLUMN]`.
@@ -1037,6 +1044,12 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::ReplicaIdentity { identity } => {
                 write!(f, "REPLICA IDENTITY {identity}")
+            }
+            AlterTableOperation::AlterConstraint {
+                name,
+                characteristics,
+            } => {
+                write!(f, "ALTER CONSTRAINT {name} {characteristics}")
             }
             AlterTableOperation::ValidateConstraint { name } => {
                 write!(f, "VALIDATE CONSTRAINT {name}")

@@ -1112,6 +1112,10 @@ impl Spanned for AlterTableOperation {
                 constraint,
                 not_valid: _,
             } => constraint.span(),
+            AlterTableOperation::AlterConstraint {
+                name,
+                characteristics,
+            } => name.span.union(&characteristics.span()),
             AlterTableOperation::AddColumn {
                 column_keyword: _,
                 if_not_exists: _,

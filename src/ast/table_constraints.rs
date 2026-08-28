@@ -231,6 +231,8 @@ pub struct ForeignKeyConstraint {
     pub referred_columns: Vec<Ident>,
     /// Action to perform `ON DELETE`.
     pub on_delete: Option<ReferentialAction>,
+    /// Referencing columns affected by `ON DELETE SET NULL` or `SET DEFAULT`.
+    pub on_delete_columns: Vec<Ident>,
     /// Action to perform `ON UPDATE`.
     pub on_update: Option<ReferentialAction>,
     /// Optional `MATCH` kind (FULL | PARTIAL | SIMPLE).
@@ -258,6 +260,9 @@ impl fmt::Display for ForeignKeyConstraint {
         }
         if let Some(action) = &self.on_delete {
             write!(f, " ON DELETE {action}")?;
+            if !self.on_delete_columns.is_empty() {
+                write!(f, " ({})", display_comma_separated(&self.on_delete_columns))?;
+            }
         }
         if let Some(action) = &self.on_update {
             write!(f, " ON UPDATE {action}")?;
@@ -284,6 +289,7 @@ impl crate::ast::Spanned for ForeignKeyConstraint {
                 .chain(core::iter::once(self.foreign_table.span()))
                 .chain(self.referred_columns.iter().map(|i| i.span))
                 .chain(self.on_delete.iter().map(|i| i.span()))
+                .chain(self.on_delete_columns.iter().map(|i| i.span))
                 .chain(self.on_update.iter().map(|i| i.span()))
                 .chain(self.characteristics.iter().map(|i| i.span())),
         )

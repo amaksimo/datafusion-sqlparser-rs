@@ -3297,6 +3297,15 @@ pub enum Set {
         role_name: Option<Ident>,
     },
     /// ```sql
+    /// SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE }
+    /// ```
+    SetConstraints {
+        /// Constraint names, or `None` for `ALL`.
+        constraints: Option<Vec<ObjectName>>,
+        /// `true` for `DEFERRED`, `false` for `IMMEDIATE`.
+        deferred: bool,
+    },
+    /// ```sql
     /// SET TIME ZONE <value>
     /// ```
     ///
@@ -3361,6 +3370,18 @@ impl Display for Set {
                     "SET {modifier}ROLE {role_name}",
                     modifier = context_modifier.map(|m| format!("{m}")).unwrap_or_default()
                 )
+            }
+            Self::SetConstraints {
+                constraints,
+                deferred,
+            } => {
+                f.write_str("SET CONSTRAINTS ")?;
+                if let Some(constraints) = constraints {
+                    write!(f, "{}", display_comma_separated(constraints))?;
+                } else {
+                    f.write_str("ALL")?;
+                }
+                write!(f, " {}", if *deferred { "DEFERRED" } else { "IMMEDIATE" })
             }
             Self::SetSessionAuthorization(kind) => write!(f, "SET SESSION AUTHORIZATION {kind}"),
             Self::SetSessionParam(kind) => write!(f, "SET {kind}"),
