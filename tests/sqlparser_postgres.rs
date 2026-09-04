@@ -9458,3 +9458,58 @@ fn parse_lock_table() {
         }
     }
 }
+
+#[test]
+fn dsql_supported_key_share_lock() {
+    pg_and_generic().verified_stmt("SELECT * FROM t FOR KEY SHARE");
+}
+
+#[test]
+fn dsql_supported_alter_group_rename() {
+    let stmt = pg().one_statement_parses_to(
+        "ALTER GROUP old_group RENAME TO new_group",
+        "ALTER ROLE old_group RENAME TO new_group",
+    );
+    assert!(matches!(
+        stmt,
+        Statement::AlterRole {
+            operation: AlterRoleOperation::RenameRole { .. },
+            ..
+        }
+    ));
+}
+
+#[test]
+fn dsql_supported_alter_default_privileges() {
+    pg().verified_stmt("ALTER DEFAULT PRIVILEGES IN SCHEMA s GRANT SELECT ON TABLES TO PUBLIC");
+}
+
+#[test]
+fn dsql_supported_routine_statements() {
+    for sql in [
+        "ALTER ROUTINE s.f() RENAME TO g",
+        "ALTER ROUTINE s.g() OWNER TO CURRENT_USER",
+        "ALTER ROUTINE s.g() SET SCHEMA other_schema",
+        "GRANT EXECUTE ON ROUTINE s.g() TO PUBLIC",
+        "REVOKE EXECUTE ON ROUTINE s.g() FROM PUBLIC",
+        "COMMENT ON ROUTINE s.g() IS 'routine comment'",
+        "DROP ROUTINE other_schema.g()",
+    ] {
+        pg().verified_stmt(sql);
+    }
+}
+
+#[test]
+fn dsql_supported_create_schema_elements() {
+    for sql in [
+        "CREATE SCHEMA s CREATE SEQUENCE s.seq CACHE 1",
+        "CREATE SCHEMA s GRANT USAGE ON SCHEMA s TO PUBLIC",
+        "CREATE SCHEMA s REVOKE USAGE ON SCHEMA s FROM PUBLIC",
+    ] {
+        let statement = pg().verified_stmt(sql);
+        match statement {
+            Statement::CreateSchema { statements, .. } => assert_eq!(statements.len(), 1),
+            _ => unreachable!(),
+        }
+    }
+}

@@ -901,6 +901,21 @@ impl<'a> Parser<'a> {
         self.expect_keyword_is(Keyword::ON)?;
         let token = self.next_token();
 
+        if matches!(&token.token, Token::Word(w) if w.keyword == Keyword::ROUTINE) {
+            let routine = self.parse_function_desc()?;
+            self.expect_keyword_is(Keyword::IS)?;
+            let comment = if self.parse_keyword(Keyword::NULL) {
+                None
+            } else {
+                Some(self.parse_literal_string()?)
+            };
+            return Ok(Statement::CommentRoutine {
+                routine,
+                comment,
+                if_exists,
+            });
+        }
+
         let (object_type, object_name) = match token.token {
             Token::Word(w) if w.keyword == Keyword::COLLATION => {
                 (CommentObject::Collation, self.parse_object_name(false)?)
@@ -5457,6 +5472,20 @@ impl<'a> Parser<'a> {
             None
         };
 
+        let mut statements = vec![];
+        loop {
+            if self.parse_keyword(Keyword::CREATE) {
+                self.expect_keyword(Keyword::SEQUENCE)?;
+                statements.push(self.parse_create_sequence(false)?);
+            } else if self.parse_keyword(Keyword::GRANT) {
+                statements.push(Statement::Grant(self.parse_grant()?));
+            } else if self.parse_keyword(Keyword::REVOKE) {
+                statements.push(Statement::Revoke(self.parse_revoke()?));
+            } else {
+                break;
+            }
+        }
+
         Ok(Statement::CreateSchema {
             schema_name,
             if_not_exists,
@@ -5464,6 +5493,7 @@ impl<'a> Parser<'a> {
             options,
             default_collate_spec,
             clone,
+            statements,
         })
     }
 
@@ -7400,6 +7430,8 @@ impl<'a> Parser<'a> {
             ObjectType::Stream
         } else if self.parse_keyword(Keyword::FUNCTION) {
             return self.parse_drop_function().map(Into::into);
+        } else if self.parse_keyword(Keyword::ROUTINE) {
+            return self.parse_drop_routine();
         } else if self.parse_keyword(Keyword::POLICY) {
             return self.parse_drop_policy().map(Into::into);
         } else if self.parse_keyword(Keyword::CONNECTOR) {
@@ -7483,6 +7515,17 @@ impl<'a> Parser<'a> {
         Ok(DropFunction {
             if_exists,
             func_desc,
+            drop_behavior,
+        })
+    }
+
+    fn parse_drop_routine(&mut self) -> Result<Statement, ParserError> {
+        let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
+        let routine_desc = self.parse_comma_separated(Parser::parse_function_desc)?;
+        let drop_behavior = self.parse_optional_drop_behavior();
+        Ok(Statement::DropRoutine {
+            if_exists,
+            routine_desc,
             drop_behavior,
         })
     }
@@ -10903,6 +10946,9 @@ impl<'a> Parser<'a> {
             Keyword::INDEX,
             Keyword::FUNCTION,
             Keyword::AGGREGATE,
+            Keyword::ROUTINE,
+            Keyword::DEFAULT,
+            Keyword::GROUP,
             Keyword::ROLE,
             Keyword::POLICY,
             Keyword::CONNECTOR,
@@ -10945,6 +10991,8 @@ impl<'a> Parser<'a> {
             }
             Keyword::FUNCTION => self.parse_alter_function(AlterFunctionKind::Function),
             Keyword::AGGREGATE => self.parse_alter_function(AlterFunctionKind::Aggregate),
+            Keyword::ROUTINE => self.parse_alter_function(AlterFunctionKind::Routine),
+            Keyword::DEFAULT => self.parse_alter_default_privileges(),
             Keyword::OPERATOR => {
                 if self.parse_keyword(Keyword::FAMILY) {
                     self.parse_alter_operator_family().map(Into::into)
@@ -10954,14 +11002,77 @@ impl<'a> Parser<'a> {
                     self.parse_alter_operator().map(Into::into)
                 }
             }
-            Keyword::ROLE => self.parse_alter_role(),
+            Keyword::GROUP | Keyword::ROLE => self.parse_alter_role(),
             Keyword::POLICY => self.parse_alter_policy().map(Into::into),
             Keyword::CONNECTOR => self.parse_alter_connector(),
             Keyword::USER => self.parse_alter_user().map(Into::into),
             // unreachable because expect_one_of_keywords used above
             unexpected_keyword => Err(ParserError::ParserError(
-                format!("Internal parser error: expected any of {{VIEW, TYPE, COLLATION, TABLE, INDEX, FUNCTION, AGGREGATE, ROLE, POLICY, CONNECTOR, ICEBERG, SCHEMA, USER, OPERATOR}}, got {unexpected_keyword:?}"),
+                format!("Internal parser error: expected any of {{VIEW, TYPE, COLLATION, TABLE, INDEX, FUNCTION, AGGREGATE, ROUTINE, DEFAULT, GROUP, ROLE, POLICY, CONNECTOR, ICEBERG, SCHEMA, USER, OPERATOR}}, got {unexpected_keyword:?}"),
             )),
+        }
+    }
+
+    fn parse_alter_default_privileges(&mut self) -> Result<Statement, ParserError> {
+        self.expect_keyword(Keyword::PRIVILEGES)?;
+
+        let target_roles = if self.parse_keyword(Keyword::FOR) {
+            self.expect_one_of_keywords(&[Keyword::ROLE, Keyword::USER])?;
+            self.parse_comma_separated(|p| p.parse_object_name(false))?
+        } else {
+            vec![]
+        };
+
+        let schemas = if self.parse_keywords(&[Keyword::IN, Keyword::SCHEMA]) {
+            self.parse_comma_separated(|p| p.parse_object_name(false))?
+        } else {
+            vec![]
+        };
+
+        let operation = if self.parse_keyword(Keyword::GRANT) {
+            let privileges = self.parse_privileges()?;
+            self.expect_keywords(&[Keyword::ON, Keyword::TABLES])?;
+            self.expect_keyword_is(Keyword::TO)?;
+            let grantees = self.parse_grantees()?;
+            let with_grant_option =
+                self.parse_keywords(&[Keyword::WITH, Keyword::GRANT, Keyword::OPTION]);
+            AlterDefaultPrivilegesOperation::Grant {
+                privileges,
+                grantees,
+                with_grant_option,
+            }
+        } else if self.parse_keyword(Keyword::REVOKE) {
+            let grant_option_for =
+                self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
+            let privileges = self.parse_privileges()?;
+            self.expect_keywords(&[Keyword::ON, Keyword::TABLES])?;
+            self.expect_keyword_is(Keyword::FROM)?;
+            let grantees = self.parse_grantees()?;
+            let cascade = self.parse_cascade_option();
+            AlterDefaultPrivilegesOperation::Revoke {
+                grant_option_for,
+                privileges,
+                grantees,
+                cascade,
+            }
+        } else {
+            return self.expected_ref("GRANT or REVOKE", self.peek_token_ref());
+        };
+
+        Ok(Statement::AlterDefaultPrivileges {
+            target_roles,
+            schemas,
+            operation,
+        })
+    }
+
+    fn parse_privileges(&mut self) -> Result<Privileges, ParserError> {
+        if self.parse_keyword(Keyword::ALL) {
+            Ok(Privileges::All {
+                with_privileges_keyword: self.parse_keyword(Keyword::PRIVILEGES),
+            })
+        } else {
+            Ok(Privileges::Actions(self.parse_actions_list()?))
         }
     }
 
@@ -11137,7 +11248,9 @@ impl<'a> Parser<'a> {
         kind: AlterFunctionKind,
     ) -> Result<Statement, ParserError> {
         let (function, aggregate_star, aggregate_order_by) = match kind {
-            AlterFunctionKind::Function => (self.parse_function_desc()?, false, None),
+            AlterFunctionKind::Function | AlterFunctionKind::Routine => {
+                (self.parse_function_desc()?, false, None)
+            }
             AlterFunctionKind::Aggregate => self.parse_alter_aggregate_signature()?,
         };
 
@@ -11171,10 +11284,7 @@ impl<'a> Parser<'a> {
             let (actions, restrict) = self.parse_alter_function_actions()?;
             AlterFunctionOperation::Actions { actions, restrict }
         } else {
-            return self.expected_ref(
-                "RENAME TO, OWNER TO, or SET SCHEMA after ALTER AGGREGATE",
-                self.peek_token_ref(),
-            );
+            return self.expected_ref("RENAME TO, OWNER TO, or SET SCHEMA", self.peek_token_ref());
         };
 
         Ok(Statement::AlterFunction(AlterFunction {
@@ -17487,14 +17597,7 @@ impl<'a> Parser<'a> {
     pub fn parse_grant_deny_revoke_privileges_objects(
         &mut self,
     ) -> Result<(Privileges, Option<GrantObjects>), ParserError> {
-        let privileges = if self.parse_keyword(Keyword::ALL) {
-            Privileges::All {
-                with_privileges_keyword: self.parse_keyword(Keyword::PRIVILEGES),
-            }
-        } else {
-            let actions = self.parse_actions_list()?;
-            Privileges::Actions(actions)
-        };
+        let privileges = self.parse_privileges()?;
 
         let objects = if self.parse_keyword(Keyword::ON) {
             if self.parse_keywords(&[Keyword::ALL, Keyword::TABLES, Keyword::IN, Keyword::SCHEMA]) {
@@ -17624,6 +17727,8 @@ impl<'a> Parser<'a> {
                 Some(GrantObjects::ExternalVolumes(
                     self.parse_comma_separated(|p| p.parse_object_name(false))?,
                 ))
+            } else if self.parse_keyword(Keyword::ROUTINE) {
+                Some(GrantObjects::Routine(self.parse_function_desc()?))
             } else {
                 let object_type = self.parse_one_of_keywords(&[
                     Keyword::SEQUENCE,
@@ -19224,12 +19329,16 @@ impl<'a> Parser<'a> {
 
     /// Parse a FOR UPDATE/FOR SHARE clause
     pub fn parse_lock(&mut self) -> Result<LockClause, ParserError> {
-        let lock_type = match self.expect_one_of_keywords(&[Keyword::UPDATE, Keyword::SHARE])? {
+        let lock_type = if self.parse_keywords(&[Keyword::KEY, Keyword::SHARE]) {
+            LockType::KeyShare
+        } else {
+            match self.expect_one_of_keywords(&[Keyword::UPDATE, Keyword::SHARE])? {
             Keyword::UPDATE => LockType::Update,
             Keyword::SHARE => LockType::Share,
             unexpected_keyword => return Err(ParserError::ParserError(
                 format!("Internal parser error: expected any of {{UPDATE, SHARE}}, got {unexpected_keyword:?}"),
             )),
+            }
         };
         let of = if self.parse_keyword(Keyword::OF) {
             Some(self.parse_object_name(false)?)

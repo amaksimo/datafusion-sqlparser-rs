@@ -56,8 +56,8 @@ pub use self::data_type::{
     ExactNumberInfo, IntervalFields, StructBracketKind, TimezoneInfo,
 };
 pub use self::dcl::{
-    AlterRoleOperation, CreateRole, Grant, ResetConfig, Revoke, RoleOption, SecondaryRoles,
-    SetConfigValue, Use,
+    AlterDefaultPrivilegesOperation, AlterRoleOperation, CreateRole, Grant, ResetConfig, Revoke,
+    RoleOption, SecondaryRoles, SetConfigValue, Use,
 };
 pub use self::ddl::{
     Alignment, AlterCollation, AlterCollationOperation, AlterColumnOperation, AlterColumnStorage,
@@ -3956,6 +3956,17 @@ pub enum Statement {
     /// ```
     DropFunction(DropFunction),
     /// ```sql
+    /// DROP ROUTINE
+    /// ```
+    DropRoutine {
+        /// `true` when `IF EXISTS` was present.
+        if_exists: bool,
+        /// One or more routines to drop.
+        routine_desc: Vec<FunctionDesc>,
+        /// Optional drop behavior (`CASCADE` or `RESTRICT`).
+        drop_behavior: Option<DropBehavior>,
+    },
+    /// ```sql
     /// DROP DOMAIN
     /// ```
     /// See [PostgreSQL](https://www.postgresql.org/docs/current/sql-dropdomain.html)
@@ -4319,6 +4330,24 @@ pub enum Statement {
         /// See <https://docs.snowflake.com/en/sql-reference/sql/comment>
         if_exists: bool,
     },
+    /// PostgreSQL `COMMENT ON ROUTINE`.
+    CommentRoutine {
+        /// Routine signature.
+        routine: FunctionDesc,
+        /// Comment text, or `NULL` to remove it.
+        comment: Option<String>,
+        /// `true` when `IF EXISTS` was present.
+        if_exists: bool,
+    },
+    /// PostgreSQL `ALTER DEFAULT PRIVILEGES`.
+    AlterDefaultPrivileges {
+        /// Optional roles whose default privileges are changed.
+        target_roles: Vec<ObjectName>,
+        /// Optional schemas limiting the change.
+        schemas: Vec<ObjectName>,
+        /// Grant or revoke operation.
+        operation: AlterDefaultPrivilegesOperation,
+    },
     /// ```sql
     /// COMMIT [ TRANSACTION | WORK ] [ AND [ NO ] CHAIN ]
     /// ```
@@ -4385,6 +4414,8 @@ pub enum Statement {
         ///
         /// [Snowflake](https://docs.snowflake.com/en/sql-reference/sql/create-clone#databases-schemas)
         clone: Option<ObjectName>,
+        /// Statements contained in the schema definition.
+        statements: Vec<Statement>,
     },
     /// ```sql
     /// CREATE DATABASE
@@ -5676,6 +5707,22 @@ impl fmt::Display for Statement {
                 Ok(())
             }
             Statement::DropFunction(drop_function) => write!(f, "{drop_function}"),
+            Statement::DropRoutine {
+                if_exists,
+                routine_desc,
+                drop_behavior,
+            } => {
+                write!(
+                    f,
+                    "DROP ROUTINE{} {}",
+                    if *if_exists { " IF EXISTS" } else { "" },
+                    display_comma_separated(routine_desc),
+                )?;
+                if let Some(op) = drop_behavior {
+                    write!(f, " {op}")?;
+                }
+                Ok(())
+            }
             Statement::DropDomain(DropDomain {
                 if_exists,
                 name,
@@ -5984,6 +6031,7 @@ impl fmt::Display for Statement {
                 options,
                 default_collate_spec,
                 clone,
+                statements,
             } => {
                 write!(
                     f,
@@ -6007,6 +6055,11 @@ impl fmt::Display for Statement {
                 if let Some(clone) = clone {
                     write!(f, " CLONE {clone}")?;
                 }
+
+                for statement in statements {
+                    write!(f, " {statement}")?;
+                }
+
                 Ok(())
             }
             Statement::Assert { condition, message } => {
@@ -6196,6 +6249,35 @@ impl fmt::Display for Statement {
                     write!(f, " COMMENT='{}'", comment)?;
                 }
                 Ok(())
+            }
+            Statement::CommentRoutine {
+                routine,
+                comment,
+                if_exists,
+            } => {
+                write!(
+                    f,
+                    "COMMENT{} ON ROUTINE {routine} IS {}",
+                    if *if_exists { " IF EXISTS" } else { "" },
+                    comment
+                        .as_ref()
+                        .map(|c| format!("'{}'", value::escape_single_quote_string(c)))
+                        .unwrap_or_else(|| "NULL".to_string())
+                )
+            }
+            Statement::AlterDefaultPrivileges {
+                target_roles,
+                schemas,
+                operation,
+            } => {
+                write!(f, "ALTER DEFAULT PRIVILEGES")?;
+                if !target_roles.is_empty() {
+                    write!(f, " FOR ROLE {}", display_comma_separated(target_roles))?;
+                }
+                if !schemas.is_empty() {
+                    write!(f, " IN SCHEMA {}", display_comma_separated(schemas))?;
+                }
+                write!(f, " {operation}")
             }
             Statement::CopyIntoSnowflake {
                 kind,
@@ -7450,7 +7532,7 @@ impl fmt::Display for Grantee {
                 write!(f, "GROUP ")?;
             }
             GranteesType::Public => {
-                write!(f, "PUBLIC ")?;
+                write!(f, "PUBLIC{}", if self.name.is_some() { " " } else { "" })?;
             }
             GranteesType::DatabaseRole => {
                 write!(f, "DATABASE ROLE ")?;
@@ -7638,6 +7720,8 @@ pub enum GrantObjects {
         /// Optional argument types for overloaded functions.
         arg_types: Vec<DataType>,
     },
+    /// Grant privileges on a routine.
+    Routine(FunctionDesc),
 }
 
 impl fmt::Display for GrantObjects {
@@ -7783,6 +7867,7 @@ impl fmt::Display for GrantObjects {
                 }
                 Ok(())
             }
+            GrantObjects::Routine(routine) => write!(f, "ROUTINE {routine}"),
         }
     }
 }

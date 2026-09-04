@@ -5546,6 +5546,8 @@ pub enum AlterFunctionKind {
     Function,
     /// `AGGREGATE`
     Aggregate,
+    /// `ROUTINE`
+    Routine,
 }
 
 impl fmt::Display for AlterFunctionKind {
@@ -5553,6 +5555,7 @@ impl fmt::Display for AlterFunctionKind {
         match self {
             Self::Function => write!(f, "FUNCTION"),
             Self::Aggregate => write!(f, "AGGREGATE"),
+            Self::Routine => write!(f, "ROUTINE"),
         }
     }
 }
@@ -5627,7 +5630,7 @@ impl fmt::Display for AlterFunction {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ALTER {} ", self.kind)?;
         match self.kind {
-            AlterFunctionKind::Function => {
+            AlterFunctionKind::Function | AlterFunctionKind::Routine => {
                 write!(f, "{} ", self.function)?;
             }
             AlterFunctionKind::Aggregate => {

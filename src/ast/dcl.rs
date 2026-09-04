@@ -485,6 +485,76 @@ impl From<Grant> for crate::ast::Statement {
     }
 }
 
+/// An `ALTER DEFAULT PRIVILEGES` operation.
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterDefaultPrivilegesOperation {
+    /// Grant default privileges on future tables.
+    Grant {
+        /// Privileges being granted.
+        privileges: Privileges,
+        /// Grantees receiving the privileges.
+        grantees: Vec<Grantee>,
+        /// Whether `WITH GRANT OPTION` is present.
+        with_grant_option: bool,
+    },
+    /// Revoke default privileges on future tables.
+    Revoke {
+        /// Whether `GRANT OPTION FOR` is present.
+        grant_option_for: bool,
+        /// Privileges being revoked.
+        privileges: Privileges,
+        /// Grantees losing the privileges.
+        grantees: Vec<Grantee>,
+        /// Optional `CASCADE`/`RESTRICT` behavior.
+        cascade: Option<CascadeOption>,
+    },
+}
+
+impl fmt::Display for AlterDefaultPrivilegesOperation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Grant {
+                privileges,
+                grantees,
+                with_grant_option,
+            } => {
+                write!(
+                    f,
+                    "GRANT {privileges} ON TABLES TO {}",
+                    display_comma_separated(grantees)
+                )?;
+                if *with_grant_option {
+                    write!(f, " WITH GRANT OPTION")?;
+                }
+                Ok(())
+            }
+            Self::Revoke {
+                grant_option_for,
+                privileges,
+                grantees,
+                cascade,
+            } => {
+                write!(
+                    f,
+                    "REVOKE {}{privileges} ON TABLES FROM {}",
+                    if *grant_option_for {
+                        "GRANT OPTION FOR "
+                    } else {
+                        ""
+                    },
+                    display_comma_separated(grantees)
+                )?;
+                if let Some(cascade) = cascade {
+                    write!(f, " {cascade}")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 /// REVOKE privileges ON objects FROM grantees
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
