@@ -3561,6 +3561,8 @@ impl fmt::Display for LockClause {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 /// The lock type used in `FOR <lock>` clauses (e.g. `FOR SHARE`, `FOR UPDATE`).
 pub enum LockType {
+    /// `KEY SHARE` lock.
+    KeyShare,
     /// `SHARE` lock (shared lock).
     Share,
     /// `UPDATE` lock (exclusive/update lock).
@@ -3570,6 +3572,7 @@ pub enum LockType {
 impl fmt::Display for LockType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let select_lock = match self {
+            LockType::KeyShare => "KEY SHARE",
             LockType::Share => "SHARE",
             LockType::Update => "UPDATE",
         };

@@ -904,6 +904,7 @@ define_keywords!(
     ROLLBACK,
     ROLLUP,
     ROOT,
+    ROUTINE,
     ROW,
     ROWGROUPSIZE,
     ROWID,
