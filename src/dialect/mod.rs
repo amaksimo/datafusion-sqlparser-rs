@@ -1219,6 +1219,7 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    /// Returns true if the dialect supports Aurora DSQL IAM role-mapping statements.
     fn supports_aws_iam_statements(&self) -> bool {
         false
     }

@@ -4552,8 +4552,11 @@ pub enum Statement {
     /// GRANT privileges ON objects TO grantees
     /// ```
     Grant(Grant),
+    /// Aurora DSQL `AWS IAM GRANT` database-role mapping statement.
     AwsIamGrant {
+        /// Database roles that the IAM principals can assume.
         roles: Vec<Ident>,
+        /// IAM role or user ARN string literals.
         arns: Vec<ValueWithSpan>,
     },
     /// ```sql
@@ -4564,8 +4567,11 @@ pub enum Statement {
     /// REVOKE privileges ON objects FROM grantees
     /// ```
     Revoke(Revoke),
+    /// Aurora DSQL `AWS IAM REVOKE` database-role mapping statement.
     AwsIamRevoke {
+        /// Database roles whose IAM-principal mappings are revoked.
         roles: Vec<Ident>,
+        /// IAM role or user ARN string literals.
         arns: Vec<ValueWithSpan>,
     },
     /// ```sql
