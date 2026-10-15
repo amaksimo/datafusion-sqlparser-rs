@@ -415,6 +415,10 @@ impl Spanned for Statement {
             // These statements need to be implemented
             Statement::AlterFunction { .. } => Span::empty(),
             Statement::AlterType { .. } => Span::empty(),
+            Statement::AlterViewOperation { .. } => Span::empty(),
+            Statement::AlterSequence { .. } => Span::empty(),
+            Statement::CreateStatistics { .. } => Span::empty(),
+            Statement::AlterStatistics { .. } => Span::empty(),
             Statement::AlterCollation { .. } => Span::empty(),
             Statement::AlterOperator { .. } => Span::empty(),
             Statement::AlterOperatorFamily { .. } => Span::empty(),

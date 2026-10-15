@@ -5175,6 +5175,7 @@ impl<'a> Parser<'a> {
                 .map(Into::into)
         } else if self.peek_keyword(Keyword::MATERIALIZED)
             || self.peek_keyword(Keyword::VIEW)
+            || self.peek_keywords(&[Keyword::RECURSIVE, Keyword::VIEW])
             || self.peek_keywords(&[Keyword::SECURE, Keyword::MATERIALIZED, Keyword::VIEW])
             || self.peek_keywords(&[Keyword::SECURE, Keyword::VIEW])
         {
@@ -5207,6 +5208,22 @@ impl<'a> Parser<'a> {
             )
         } else if self.parse_keyword(Keyword::EXTENSION) {
             self.parse_create_extension().map(Into::into)
+        } else if self.parse_keyword(Keyword::STATISTICS) {
+            if temporary
+                || or_alter
+                || volatile
+                || persistent
+                || transient
+                || global.is_some()
+                || multiset.is_some()
+                || create_view_params.is_some()
+            {
+                return parser_err!(
+                    "CREATE STATISTICS does not take table or view modifiers",
+                    self.peek_token_ref().span.start
+                );
+            }
+            self.parse_create_statistics()
         } else if self.parse_keyword(Keyword::INDEX) {
             self.parse_create_index(false).map(Into::into)
         } else if self.parse_keywords(&[Keyword::UNIQUE, Keyword::INDEX]) {
@@ -6573,6 +6590,7 @@ impl<'a> Parser<'a> {
     ) -> Result<CreateView, ParserError> {
         let secure = self.parse_keyword(Keyword::SECURE);
         let materialized = self.parse_keyword(Keyword::MATERIALIZED);
+        let recursive = !materialized && self.parse_keyword(Keyword::RECURSIVE);
         self.expect_keyword_is(Keyword::VIEW)?;
         let allow_unquoted_hyphen = dialect_of!(self is BigQueryDialect);
         // Tries to parse IF NOT EXISTS either before name or after name
@@ -6585,8 +6603,10 @@ impl<'a> Parser<'a> {
         let if_not_exists = if_not_exists_first || name_before_not_exists;
         let mut copy_grants = self.parse_keywords(&[Keyword::COPY, Keyword::GRANTS]);
         // Many dialects support `OR ALTER` right after `CREATE`, but we don't (yet).
-        // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let columns = self.parse_view_columns()?;
+        if recursive && columns.is_empty() {
+            return self.expected_ref("column list for RECURSIVE VIEW", self.peek_token_ref());
+        }
         // Snowflake also documents `COPY GRANTS` *after* the column list; accept
         // either position, but not both.
         // <https://docs.snowflake.com/en/sql-reference/sql/create-view#syntax>
@@ -6633,7 +6653,27 @@ impl<'a> Parser<'a> {
 
         self.expect_keyword_is(Keyword::AS)?;
         let query = self.parse_query()?;
-        // Optional `WITH [ CASCADED | LOCAL ] CHECK OPTION` is widely supported here.
+        let check_option = if materialized {
+            None
+        } else if self.parse_keywords(&[Keyword::WITH, Keyword::CHECK, Keyword::OPTION]) {
+            Some(ViewCheckOption::Unspecified)
+        } else if self.parse_keywords(&[
+            Keyword::WITH,
+            Keyword::CASCADED,
+            Keyword::CHECK,
+            Keyword::OPTION,
+        ]) {
+            Some(ViewCheckOption::Cascaded)
+        } else if self.parse_keywords(&[
+            Keyword::WITH,
+            Keyword::LOCAL,
+            Keyword::CHECK,
+            Keyword::OPTION,
+        ]) {
+            Some(ViewCheckOption::Local)
+        } else {
+            None
+        };
 
         let with_no_schema_binding = dialect_of!(self is RedshiftSqlDialect | GenericDialect)
             && self.parse_keywords(&[
@@ -6661,6 +6701,8 @@ impl<'a> Parser<'a> {
             to,
             params: create_view_params,
             name_before_not_exists,
+            recursive,
+            check_option,
         })
     }
 
@@ -7431,6 +7473,8 @@ impl<'a> Parser<'a> {
             ObjectType::Database
         } else if self.parse_keyword(Keyword::SEQUENCE) {
             ObjectType::Sequence
+        } else if self.parse_keyword(Keyword::STATISTICS) {
+            ObjectType::Statistics
         } else if self.parse_keyword(Keyword::STAGE) {
             ObjectType::Stage
         } else if self.parse_keyword(Keyword::TYPE) {
@@ -10269,6 +10313,13 @@ impl<'a> Parser<'a> {
             }
             _ => {
                 let name = self.parse_identifier()?;
+                // PostgreSQL storage and view options take an optional value:
+                // `WITH (security_barrier)` means `security_barrier = true`.
+                if dialect_of!(self is PostgreSqlDialect | GenericDialect)
+                    && matches!(self.peek_token_ref().token, Token::Comma | Token::RParen)
+                {
+                    return Ok(SqlOption::Ident(name));
+                }
                 self.expect_token(&Token::Eq)?;
                 let value = self.parse_expr()?;
 
@@ -10967,6 +11018,8 @@ impl<'a> Parser<'a> {
             Keyword::SCHEMA,
             Keyword::USER,
             Keyword::OPERATOR,
+            Keyword::SEQUENCE,
+            Keyword::STATISTICS,
         ])?;
         match object_type {
             Keyword::SCHEMA => {
@@ -10975,6 +11028,8 @@ impl<'a> Parser<'a> {
                 self.parse_alter_schema()
             }
             Keyword::VIEW => self.parse_alter_view(),
+            Keyword::SEQUENCE => self.parse_alter_sequence(),
+            Keyword::STATISTICS => self.parse_alter_statistics(),
             Keyword::TYPE => self.parse_alter_type(),
             Keyword::COLLATION => self.parse_alter_collation().map(Into::into),
             Keyword::TABLE => self.parse_alter_table(false),
@@ -11358,7 +11413,21 @@ impl<'a> Parser<'a> {
 
     /// Parse an `ALTER VIEW` statement.
     pub fn parse_alter_view(&mut self) -> Result<Statement, ParserError> {
+        let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
         let name = self.parse_object_name(false)?;
+        if let Some(operation) = self.parse_alter_view_operation()? {
+            return Ok(Statement::AlterViewOperation {
+                if_exists,
+                name,
+                operation,
+            });
+        }
+        if if_exists {
+            return self.expected_ref(
+                "ALTER, OWNER TO, RENAME, SET, or RESET after ALTER VIEW IF EXISTS",
+                self.peek_token_ref(),
+            );
+        }
         let columns = self.parse_parenthesized_column_list(Optional, false)?;
 
         let with_options = self.parse_options(Keyword::WITH)?;
@@ -11372,6 +11441,233 @@ impl<'a> Parser<'a> {
             query,
             with_options,
         })
+    }
+
+    /// Parse the PostgreSQL `ALTER VIEW` operation that follows the view name,
+    /// or return `None` for the `[ (columns) ] [ WITH (...) ] AS query` form.
+    fn parse_alter_view_operation(&mut self) -> Result<Option<AlterViewOperation>, ParserError> {
+        if self.parse_keyword(Keyword::ALTER) {
+            let column_keyword = self.parse_keyword(Keyword::COLUMN);
+            let column = self.parse_identifier()?;
+            let operation = if self.parse_keywords(&[Keyword::SET, Keyword::DEFAULT]) {
+                AlterViewOperation::AlterColumnSetDefault {
+                    column_keyword,
+                    column,
+                    default: self.parse_expr()?,
+                }
+            } else if self.parse_keywords(&[Keyword::DROP, Keyword::DEFAULT]) {
+                AlterViewOperation::AlterColumnDropDefault {
+                    column_keyword,
+                    column,
+                }
+            } else {
+                return self.expected_ref("SET DEFAULT or DROP DEFAULT", self.peek_token_ref());
+            };
+            Ok(Some(operation))
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            Ok(Some(AlterViewOperation::OwnerTo(self.parse_owner()?)))
+        } else if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                return Ok(Some(AlterViewOperation::RenameTo(self.parse_identifier()?)));
+            }
+            let column_keyword = self.parse_keyword(Keyword::COLUMN);
+            let old_name = self.parse_identifier()?;
+            self.expect_keyword_is(Keyword::TO)?;
+            let new_name = self.parse_identifier()?;
+            Ok(Some(AlterViewOperation::RenameColumn {
+                column_keyword,
+                old_name,
+                new_name,
+            }))
+        } else if self.parse_keywords(&[Keyword::SET, Keyword::SCHEMA]) {
+            Ok(Some(AlterViewOperation::SetSchema(
+                self.parse_object_name(false)?,
+            )))
+        } else if self.parse_keyword(Keyword::SET) {
+            self.expect_token(&Token::LParen)?;
+            let options = self.parse_comma_separated(Parser::parse_sql_option)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(Some(AlterViewOperation::SetOptions(options)))
+        } else if self.parse_keyword(Keyword::RESET) {
+            self.expect_token(&Token::LParen)?;
+            let options = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(Some(AlterViewOperation::ResetOptions(options)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Parse a PostgreSQL `ALTER SEQUENCE` statement.
+    pub fn parse_alter_sequence(&mut self) -> Result<Statement, ParserError> {
+        let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
+        let name = self.parse_object_name(false)?;
+        let operation = if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            AlterSequenceOperation::OwnerTo(self.parse_owner()?)
+        } else if self.parse_keywords(&[Keyword::RENAME, Keyword::TO]) {
+            AlterSequenceOperation::RenameTo(self.parse_identifier()?)
+        } else if self.parse_keywords(&[Keyword::SET, Keyword::SCHEMA]) {
+            AlterSequenceOperation::SetSchema(self.parse_object_name(false)?)
+        } else {
+            let mut data_type = self.parse_sequence_data_type(None)?;
+            let mut sequence_options = vec![];
+            let mut owned_by = None;
+            loop {
+                let mut options = self.parse_create_sequence_options()?;
+                let progressed = !options.is_empty();
+                sequence_options.append(&mut options);
+                if self.peek_keyword(Keyword::AS) {
+                    data_type = self.parse_sequence_data_type(data_type)?;
+                } else if self.parse_keyword(Keyword::RESTART) {
+                    let with = self.parse_keyword(Keyword::WITH);
+                    let restart = if with
+                        || matches!(
+                            self.peek_token_ref().token,
+                            Token::Number(_, _) | Token::Minus | Token::Plus
+                        ) {
+                        Some(self.parse_number()?)
+                    } else {
+                        None
+                    };
+                    sequence_options.push(SequenceOptions::Restart(restart, with));
+                } else if self.peek_keywords(&[Keyword::OWNED, Keyword::BY]) {
+                    owned_by = self.parse_sequence_owned_by(owned_by)?;
+                } else if !progressed {
+                    break;
+                }
+            }
+            if data_type.is_none() && sequence_options.is_empty() && owned_by.is_none() {
+                return self.expected_ref("an ALTER SEQUENCE action", self.peek_token_ref());
+            }
+            AlterSequenceOperation::Options {
+                data_type,
+                sequence_options,
+                owned_by,
+            }
+        };
+        Ok(Statement::AlterSequence(AlterSequence {
+            if_exists,
+            name,
+            operation,
+        }))
+    }
+
+    /// Parse a PostgreSQL `CREATE STATISTICS` statement.
+    pub fn parse_create_statistics(&mut self) -> Result<Statement, ParserError> {
+        let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
+        let name = if if_not_exists
+            || !(self.peek_keyword(Keyword::ON) || self.peek_token_ref().token == Token::LParen)
+        {
+            Some(self.parse_object_name(false)?)
+        } else {
+            None
+        };
+        let kinds = if self.consume_token(&Token::LParen) {
+            let kinds = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_token(&Token::RParen)?;
+            kinds
+        } else {
+            vec![]
+        };
+        self.expect_keyword_is(Keyword::ON)?;
+        let expressions = self.parse_comma_separated(|parser| {
+            // PostgreSQL `stats_param`: an unqualified column name, a windowless
+            // function expression, or a parenthesized expression.
+            let expr = parser.parse_expr()?;
+            let allowed = match &expr {
+                Expr::Identifier(_) | Expr::Nested(_) => true,
+                Expr::Function(function) => {
+                    function.over.is_none()
+                        && function.filter.is_none()
+                        && function.within_group.is_empty()
+                        && function.null_treatment.is_none()
+                }
+                Expr::Cast {
+                    kind: CastKind::Cast,
+                    ..
+                }
+                | Expr::Extract { .. }
+                | Expr::Ceil { .. }
+                | Expr::Floor { .. }
+                | Expr::Position { .. }
+                | Expr::Substring { .. }
+                | Expr::Trim { .. }
+                | Expr::Overlay { .. } => true,
+                _ => false,
+            };
+            if allowed {
+                Ok(expr)
+            } else {
+                parser_err!(
+                    format!(
+                        "CREATE STATISTICS expects a column name, a function call, or a parenthesized expression, found {expr}"
+                    ),
+                    parser.peek_token_ref().span.start
+                )
+            }
+        })?;
+        self.expect_keyword_is(Keyword::FROM)?;
+        let table = self.parse_object_name(false)?;
+        Ok(Statement::CreateStatistics(CreateStatistics {
+            if_not_exists,
+            name,
+            kinds,
+            expressions,
+            table,
+        }))
+    }
+
+    /// Parse a PostgreSQL `SignedIconst`: an optional sign followed by an
+    /// integer literal that fits in 32 bits, such as `100`, `-1`, or `+5`.
+    fn parse_signed_iconst(&mut self) -> Result<Expr, ParserError> {
+        let sign = match self.peek_token_ref().token {
+            Token::Minus | Token::Plus => 1,
+            _ => 0,
+        };
+        let is_iconst = match &self.peek_nth_token_ref(sign).token {
+            Token::Number(n, false) => {
+                n.bytes().all(|b| b.is_ascii_digit()) && n.parse::<i32>().is_ok()
+            }
+            _ => false,
+        };
+        if !is_iconst {
+            return self.expected_ref("an integer", self.peek_nth_token_ref(sign));
+        }
+        self.parse_number()
+    }
+
+    /// Parse a PostgreSQL `ALTER STATISTICS` statement.
+    pub fn parse_alter_statistics(&mut self) -> Result<Statement, ParserError> {
+        let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
+        let name = self.parse_object_name(false)?;
+        let operation = if self.parse_keywords(&[Keyword::SET, Keyword::STATISTICS]) {
+            if self.parse_keyword(Keyword::DEFAULT) {
+                AlterStatisticsOperation::SetStatistics(None)
+            } else {
+                AlterStatisticsOperation::SetStatistics(Some(self.parse_signed_iconst()?))
+            }
+        } else if if_exists {
+            return self.expected_ref(
+                "SET STATISTICS after ALTER STATISTICS IF EXISTS",
+                self.peek_token_ref(),
+            );
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            AlterStatisticsOperation::OwnerTo(self.parse_owner()?)
+        } else if self.parse_keywords(&[Keyword::RENAME, Keyword::TO]) {
+            AlterStatisticsOperation::RenameTo(self.parse_identifier()?)
+        } else if self.parse_keywords(&[Keyword::SET, Keyword::SCHEMA]) {
+            AlterStatisticsOperation::SetSchema(self.parse_object_name(false)?)
+        } else {
+            return self.expected_ref(
+                "OWNER TO, RENAME TO, SET SCHEMA, or SET STATISTICS",
+                self.peek_token_ref(),
+            );
+        };
+        Ok(Statement::AlterStatistics(AlterStatistics {
+            if_exists,
+            name,
+            operation,
+        }))
     }
 
     /// Parse a [Statement::AlterType]
@@ -20055,22 +20351,23 @@ impl<'a> Parser<'a> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         //name
         let name = self.parse_object_name(false)?;
-        //[ AS data_type ]
-        let mut data_type: Option<DataType> = None;
-        if self.parse_keywords(&[Keyword::AS]) {
-            data_type = Some(self.parse_data_type()?)
-        }
-        let sequence_options = self.parse_create_sequence_options()?;
-        // [ OWNED BY { table_name.column_name | NONE } ]
-        let owned_by = if self.parse_keywords(&[Keyword::OWNED, Keyword::BY]) {
-            if self.parse_keywords(&[Keyword::NONE]) {
-                Some(ObjectName::from(vec![Ident::new("NONE")]))
-            } else {
-                Some(self.parse_object_name(false)?)
+        // `AS data_type` and `OWNED BY` are sequence options, so like the other
+        // options they may appear in any order.
+        let mut data_type = None;
+        let mut sequence_options = vec![];
+        let mut owned_by = None;
+        loop {
+            let mut options = self.parse_create_sequence_options()?;
+            let progressed = !options.is_empty();
+            sequence_options.append(&mut options);
+            if self.peek_keyword(Keyword::AS) {
+                data_type = self.parse_sequence_data_type(data_type)?;
+            } else if self.peek_keywords(&[Keyword::OWNED, Keyword::BY]) {
+                owned_by = self.parse_sequence_owned_by(owned_by)?;
+            } else if !progressed {
+                break;
             }
-        } else {
-            None
-        };
+        }
         Ok(Statement::CreateSequence {
             temporary,
             if_not_exists,
@@ -20079,6 +20376,47 @@ impl<'a> Parser<'a> {
             sequence_options,
             owned_by,
         })
+    }
+
+    /// Parse an optional `OWNED BY { table_name.column_name | NONE }` sequence
+    /// option. `current` is the value already parsed; a second `OWNED BY` is an
+    /// error.
+    fn parse_sequence_owned_by(
+        &mut self,
+        current: Option<ObjectName>,
+    ) -> Result<Option<ObjectName>, ParserError> {
+        if !self.parse_keywords(&[Keyword::OWNED, Keyword::BY]) {
+            return Ok(current);
+        }
+        if current.is_some() {
+            return parser_err!(
+                "conflicting or redundant sequence OWNED BY options",
+                self.peek_token_ref().span.start
+            );
+        }
+        Ok(Some(if self.parse_keyword(Keyword::NONE) {
+            ObjectName::from(vec![Ident::new("NONE")])
+        } else {
+            self.parse_object_name(false)?
+        }))
+    }
+
+    /// Parse an optional `AS data_type` sequence option. `current` is the type
+    /// already parsed for this statement; a second `AS` is an error.
+    fn parse_sequence_data_type(
+        &mut self,
+        current: Option<DataType>,
+    ) -> Result<Option<DataType>, ParserError> {
+        if !self.parse_keyword(Keyword::AS) {
+            return Ok(current);
+        }
+        if current.is_some() {
+            return parser_err!(
+                "conflicting or redundant sequence AS data_type options",
+                self.peek_token_ref().span.start
+            );
+        }
+        Ok(Some(self.parse_data_type()?))
     }
 
     fn parse_create_sequence_options(&mut self) -> Result<Vec<SequenceOptions>, ParserError> {

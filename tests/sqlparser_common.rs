@@ -8531,6 +8531,8 @@ fn parse_create_view() {
             name_before_not_exists: _,
             secure: _,
             copy_grants: _,
+            recursive: false,
+            check_option: None,
         }) => {
             assert_eq!(or_alter, false);
             assert_eq!("myschema.myview", name.to_string());
@@ -8650,6 +8652,8 @@ fn parse_create_view_temporary() {
             name_before_not_exists: _,
             secure: _,
             copy_grants: _,
+            recursive: false,
+            check_option: None,
         }) => {
             assert_eq!(or_alter, false);
             assert_eq!("myschema.myview", name.to_string());
@@ -8692,6 +8696,8 @@ fn parse_create_or_replace_view() {
             name_before_not_exists: _,
             secure: _,
             copy_grants: _,
+            recursive: false,
+            check_option: None,
         }) => {
             assert_eq!(or_alter, false);
             assert_eq!("v", name.to_string());
@@ -8738,6 +8744,8 @@ fn parse_create_or_replace_materialized_view() {
             name_before_not_exists: _,
             secure: _,
             copy_grants: _,
+            recursive: false,
+            check_option: None,
         }) => {
             assert_eq!(or_alter, false);
             assert_eq!("v", name.to_string());
@@ -8780,6 +8788,8 @@ fn parse_create_materialized_view() {
             name_before_not_exists: _,
             secure: _,
             copy_grants: _,
+            recursive: false,
+            check_option: None,
         }) => {
             assert_eq!(or_alter, false);
             assert_eq!("myschema.myview", name.to_string());
@@ -8822,6 +8832,8 @@ fn parse_create_materialized_view_with_cluster_by() {
             name_before_not_exists: _,
             secure: _,
             copy_grants: _,
+            recursive: false,
+            check_option: None,
         }) => {
             assert_eq!(or_alter, false);
             assert_eq!("myschema.myview", name.to_string());

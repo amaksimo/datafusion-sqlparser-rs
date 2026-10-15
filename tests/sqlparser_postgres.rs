@@ -9731,3 +9731,333 @@ fn set_session_characteristics_requires_transaction_mode() {
         .parse_sql_statements("SET SESSION CHARACTERISTICS AS TRANSACTION")
         .is_err());
 }
+
+#[test]
+fn dsql_supported_create_statistics() {
+    for sql in [
+        "CREATE STATISTICS s1 ON a, b FROM t",
+        "CREATE STATISTICS s2 (ndistinct, dependencies, mcv) ON a, b FROM t",
+        "CREATE STATISTICS IF NOT EXISTS s2 (dependencies) ON a, b FROM t",
+        "CREATE STATISTICS s3 ON (lower(c)) FROM t",
+        "CREATE STATISTICS s4 ON a, (b + 1) FROM t",
+        "CREATE STATISTICS ON a, c FROM t",
+        "CREATE STATISTICS (mcv) ON a, b FROM t",
+        "CREATE STATISTICS myschema.s5 ON b, c FROM myschema.t2",
+        "CREATE STATISTICS s6 ON a, CEIL(b) FROM t",
+        "CREATE STATISTICS s7 ON a, CAST(b AS TEXT) FROM t",
+        "CREATE STATISTICS s8 ON a, EXTRACT(YEAR FROM d) FROM t",
+        "CREATE STATISTICS s9 ON a, SUBSTRING(c FROM 1 FOR 2) FROM t",
+        "CREATE STATISTICS s10 ON a, COALESCE(a, 0) FROM t",
+        "CREATE STATISTICS s11 ON lower(c), a FROM t",
+        "CREATE STATISTICS s12 ON a, FLOOR(b), POSITION('x' IN c) FROM t",
+        "CREATE STATISTICS s13 ON TRIM(c), OVERLAY(c PLACING 'x' FROM 1 FOR 1) FROM t",
+    ] {
+        pg().verified_stmt(sql);
+    }
+
+    match pg()
+        .verified_stmt("CREATE STATISTICS IF NOT EXISTS s (ndistinct, mcv) ON a, (b + 1) FROM s.t")
+    {
+        Statement::CreateStatistics(CreateStatistics {
+            if_not_exists,
+            name,
+            kinds,
+            expressions,
+            table,
+        }) => {
+            assert!(if_not_exists);
+            assert_eq!(name, Some(ObjectName::from(vec![Ident::new("s")])));
+            assert_eq!(kinds, vec![Ident::new("ndistinct"), Ident::new("mcv")]);
+            assert_eq!(expressions.len(), 2);
+            assert_eq!(
+                table,
+                ObjectName::from(vec![Ident::new("s"), Ident::new("t")])
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    for sql in [
+        "CREATE STATISTICS IF NOT EXISTS ON a, b FROM t",
+        "CREATE STATISTICS s ON a, b",
+        "CREATE STATISTICS s () ON a, b FROM t",
+        "CREATE STATISTICS s ON a + b FROM t",
+        "CREATE STATISTICS s ON a, b + 1 FROM t",
+        "CREATE TEMPORARY STATISTICS s ON a, b FROM t",
+        "CREATE OR ALTER STATISTICS s ON a, b FROM t",
+        "CREATE GLOBAL STATISTICS s ON a, b FROM t",
+        "CREATE VOLATILE STATISTICS s ON a, b FROM t",
+        "CREATE TRANSIENT STATISTICS s ON a, b FROM t",
+        "CREATE STATISTICS s ON t.a, b FROM t",
+        "CREATE STATISTICS s ON a, sum(a) OVER () FROM t",
+        "CREATE STATISTICS s ON a, b::TEXT FROM t",
+        "CREATE STATISTICS s ON a, count(*) FILTER (WHERE a > 0) FROM t",
+        "CREATE STATISTICS s ON a, percentile_cont(0.5) WITHIN GROUP (ORDER BY b) FROM t",
+        "CREATE MULTISET STATISTICS s ON a, b FROM t",
+    ] {
+        assert!(pg().parse_sql_statements(sql).is_err(), "{sql}");
+    }
+}
+
+#[test]
+fn dsql_supported_alter_statistics() {
+    for sql in [
+        "ALTER STATISTICS s SET STATISTICS 100",
+        "ALTER STATISTICS s SET STATISTICS -1",
+        "ALTER STATISTICS s SET STATISTICS DEFAULT",
+        "ALTER STATISTICS IF EXISTS s SET STATISTICS 0",
+        "ALTER STATISTICS s RENAME TO s2",
+        "ALTER STATISTICS s OWNER TO CURRENT_USER",
+        "ALTER STATISTICS s SET SCHEMA other",
+        "ALTER STATISTICS s SET STATISTICS +50",
+        "ALTER STATISTICS s SET STATISTICS 2147483647",
+    ] {
+        pg().verified_stmt(sql);
+    }
+
+    match pg().verified_stmt("ALTER STATISTICS IF EXISTS myschema.s SET STATISTICS DEFAULT") {
+        Statement::AlterStatistics(AlterStatistics {
+            if_exists,
+            name,
+            operation,
+        }) => {
+            assert!(if_exists);
+            assert_eq!(name.to_string(), "myschema.s");
+            assert_eq!(operation, AlterStatisticsOperation::SetStatistics(None));
+        }
+        _ => unreachable!(),
+    }
+
+    // IF EXISTS belongs to the SET STATISTICS form only.
+    for sql in [
+        "ALTER STATISTICS IF EXISTS s RENAME TO s2",
+        "ALTER STATISTICS IF EXISTS s OWNER TO CURRENT_USER",
+        "ALTER STATISTICS IF EXISTS s SET SCHEMA other",
+        "ALTER STATISTICS s",
+        "ALTER STATISTICS s SET STATISTICS 50.5",
+        "ALTER STATISTICS s SET STATISTICS 1e2",
+        "ALTER STATISTICS s SET STATISTICS 99999999999999999999",
+        "ALTER STATISTICS s SET STATISTICS 2147483648",
+    ] {
+        assert!(pg().parse_sql_statements(sql).is_err(), "{sql}");
+    }
+}
+
+#[test]
+fn dsql_supported_drop_statistics() {
+    for sql in [
+        "DROP STATISTICS s",
+        "DROP STATISTICS IF EXISTS s, other.s2 CASCADE",
+        "DROP STATISTICS s RESTRICT",
+    ] {
+        match pg().verified_stmt(sql) {
+            Statement::Drop { object_type, .. } => assert_eq!(object_type, ObjectType::Statistics),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
+fn dsql_supported_create_view_forms() {
+    for sql in [
+        "CREATE RECURSIVE VIEW nums (n) AS VALUES (1) UNION ALL SELECT n + 1 FROM nums WHERE n < 10",
+        "CREATE OR REPLACE RECURSIVE VIEW public.nums (n) AS VALUES (1) UNION ALL SELECT n + 1 FROM nums WHERE n < 20",
+        "CREATE VIEW v1 AS SELECT id, a FROM t WHERE a > 0 WITH CHECK OPTION",
+        "CREATE VIEW v2 AS SELECT id, a FROM v1 WHERE a < 100 WITH CASCADED CHECK OPTION",
+        "CREATE OR REPLACE VIEW v2 AS SELECT id, a FROM v1 WHERE a < 50 WITH LOCAL CHECK OPTION",
+        "CREATE VIEW v3 WITH (security_invoker = true, security_barrier) AS SELECT id FROM t",
+        "CREATE VIEW v4 WITH (check_option = local) AS SELECT id, a FROM t WHERE a > 0",
+    ] {
+        pg().verified_stmt(sql);
+    }
+
+    match pg().verified_stmt(
+        "CREATE OR REPLACE VIEW v WITH (security_barrier) AS SELECT 1 WITH CASCADED CHECK OPTION",
+    ) {
+        Statement::CreateView(CreateView {
+            or_replace,
+            recursive,
+            check_option,
+            options,
+            ..
+        }) => {
+            assert!(or_replace);
+            assert!(!recursive);
+            assert_eq!(check_option, Some(ViewCheckOption::Cascaded));
+            assert_eq!(
+                options,
+                CreateTableOptions::With(vec![SqlOption::Ident(Ident::new("security_barrier"))])
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    match pg().verified_stmt("CREATE RECURSIVE VIEW nums (n) AS VALUES (1)") {
+        Statement::CreateView(CreateView {
+            recursive,
+            check_option,
+            columns,
+            ..
+        }) => {
+            assert!(recursive);
+            assert_eq!(check_option, None);
+            assert_eq!(columns.len(), 1);
+        }
+        _ => unreachable!(),
+    }
+
+    // A recursive view names its output columns; RECURSIVE and CHECK OPTION
+    // belong to plain views.
+    for sql in [
+        "CREATE RECURSIVE VIEW r AS VALUES (1)",
+        "CREATE MATERIALIZED RECURSIVE VIEW r (n) AS SELECT 1",
+        "CREATE MATERIALIZED VIEW mv AS SELECT 1 WITH CHECK OPTION",
+    ] {
+        assert!(pg().parse_sql_statements(sql).is_err(), "{sql}");
+    }
+}
+
+#[test]
+fn dsql_supported_alter_view_operations() {
+    for sql in [
+        "ALTER VIEW v ALTER COLUMN a SET DEFAULT 1",
+        "ALTER VIEW IF EXISTS v ALTER a DROP DEFAULT",
+        "ALTER VIEW v OWNER TO CURRENT_USER",
+        "ALTER VIEW v RENAME COLUMN id TO new_id",
+        "ALTER VIEW v RENAME new_id TO id",
+        "ALTER VIEW v RENAME TO v2",
+        "ALTER VIEW v SET SCHEMA other",
+        "ALTER VIEW v SET (check_option = cascaded, security_barrier = true)",
+        "ALTER VIEW v SET (security_barrier)",
+        "ALTER VIEW v RESET (check_option, security_barrier)",
+        "ALTER VIEW IF EXISTS missing RENAME TO missing2",
+    ] {
+        pg().verified_stmt(sql);
+    }
+
+    match pg().verified_stmt("ALTER VIEW IF EXISTS s.v ALTER COLUMN ts SET DEFAULT now()") {
+        Statement::AlterViewOperation {
+            if_exists,
+            name,
+            operation,
+        } => {
+            assert!(if_exists);
+            assert_eq!(name.to_string(), "s.v");
+            assert!(matches!(
+                operation,
+                AlterViewOperation::AlterColumnSetDefault {
+                    column_keyword: true,
+                    ..
+                }
+            ));
+        }
+        _ => unreachable!(),
+    }
+
+    // The query form keeps its own statement variant.
+    assert!(matches!(
+        pg().verified_stmt("ALTER VIEW v AS SELECT 1"),
+        Statement::AlterView { .. }
+    ));
+
+    for sql in [
+        "ALTER VIEW v",
+        "ALTER VIEW v RESET ()",
+        "ALTER VIEW v RENAME COLUMN a",
+        "ALTER VIEW IF EXISTS v AS SELECT 1",
+    ] {
+        assert!(pg().parse_sql_statements(sql).is_err(), "{sql}");
+    }
+}
+
+#[test]
+fn dsql_supported_alter_sequence() {
+    for sql in [
+        "ALTER SEQUENCE seq INCREMENT BY 2 MINVALUE 1 MAXVALUE 1000000 NO CYCLE",
+        "ALTER SEQUENCE seq RESTART WITH 105",
+        "ALTER SEQUENCE IF EXISTS seq RESTART",
+        "ALTER SEQUENCE seq START WITH 10",
+        "ALTER SEQUENCE seq CACHE 65536",
+        "ALTER SEQUENCE seq NO MINVALUE NO MAXVALUE CYCLE",
+        "ALTER SEQUENCE seq INCREMENT 3 RESTART 1 CACHE 1",
+        "ALTER SEQUENCE seq AS BIGINT",
+        "ALTER SEQUENCE seq OWNED BY t.a",
+        "ALTER SEQUENCE seq OWNED BY NONE",
+        "ALTER SEQUENCE seq OWNER TO CURRENT_USER",
+        "ALTER SEQUENCE seq RENAME TO seq2",
+        "ALTER SEQUENCE seq2 SET SCHEMA other",
+        "ALTER SEQUENCE IF EXISTS missing RESTART",
+    ] {
+        pg().verified_stmt(sql);
+    }
+
+    match pg().verified_stmt(
+        "ALTER SEQUENCE IF EXISTS s.seq AS BIGINT RESTART WITH 5 CACHE 1 OWNED BY t.a",
+    ) {
+        Statement::AlterSequence(AlterSequence {
+            if_exists,
+            name,
+            operation:
+                AlterSequenceOperation::Options {
+                    data_type,
+                    sequence_options,
+                    owned_by,
+                },
+        }) => {
+            assert!(if_exists);
+            assert_eq!(name.to_string(), "s.seq");
+            assert_eq!(data_type, Some(DataType::BigInt(None)));
+            assert_eq!(
+                sequence_options,
+                vec![
+                    SequenceOptions::Restart(Some(Expr::value(number("5"))), true),
+                    SequenceOptions::Cache(Expr::value(number("1"))),
+                ]
+            );
+            assert_eq!(owned_by.map(|o| o.to_string()), Some("t.a".to_string()));
+        }
+        _ => unreachable!(),
+    }
+
+    // `AS data_type` is a sequence option and may appear anywhere in the list.
+    for (sql, canonical) in [
+        (
+            "ALTER SEQUENCE seq RESTART AS BIGINT",
+            "ALTER SEQUENCE seq AS BIGINT RESTART",
+        ),
+        (
+            "ALTER SEQUENCE seq INCREMENT BY 1 AS BIGINT CACHE 1",
+            "ALTER SEQUENCE seq AS BIGINT INCREMENT BY 1 CACHE 1",
+        ),
+        (
+            "CREATE SEQUENCE seq CACHE 1 AS BIGINT",
+            "CREATE SEQUENCE seq AS BIGINT CACHE 1",
+        ),
+        (
+            "CREATE SEQUENCE seq CACHE 1 OWNED BY NONE AS BIGINT",
+            "CREATE SEQUENCE seq AS BIGINT CACHE 1 OWNED BY NONE",
+        ),
+        (
+            "CREATE SEQUENCE seq OWNED BY t.a CACHE 1",
+            "CREATE SEQUENCE seq CACHE 1 OWNED BY t.a",
+        ),
+        (
+            "ALTER SEQUENCE seq OWNED BY NONE AS BIGINT CACHE 1",
+            "ALTER SEQUENCE seq AS BIGINT CACHE 1 OWNED BY NONE",
+        ),
+    ] {
+        pg().one_statement_parses_to(sql, canonical);
+    }
+
+    for sql in [
+        "ALTER SEQUENCE seq",
+        "ALTER SEQUENCE IF EXISTS seq",
+        "ALTER SEQUENCE seq RENAME seq2",
+        "ALTER SEQUENCE seq AS BIGINT CACHE 1 AS BIGINT",
+        "CREATE SEQUENCE seq AS BIGINT CACHE 1 AS BIGINT",
+        "CREATE SEQUENCE seq OWNED BY NONE CACHE 1 OWNED BY NONE",
+        "ALTER SEQUENCE seq OWNED BY NONE CACHE 1 OWNED BY NONE",
+    ] {
+        assert!(pg().parse_sql_statements(sql).is_err(), "{sql}");
+    }
+}

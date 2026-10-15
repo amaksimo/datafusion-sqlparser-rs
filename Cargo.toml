@@ -18,7 +18,7 @@
 [package]
 name = "sqlparser-dsql"
 description = "SQL parser fork with Aurora DSQL extensions and DSQL-supported PostgreSQL syntax. Based on sqlparser 0.62.0."
-version = "0.62.11"
+version = "0.62.12"
 authors = [
     "Apache DataFusion <dev@datafusion.apache.org>",
     "Amazon Web Services",
