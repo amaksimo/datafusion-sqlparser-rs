@@ -9687,3 +9687,47 @@ fn dsql_aws_iam_custom_dialect_opt_in() {
     assert!(matches!(statements[0], Statement::AwsIamGrant { .. }));
     assert_eq!(statements[0].to_string(), sql);
 }
+
+#[test]
+fn set_characteristics_requires_session_scope() {
+    for sql in [
+        "SET CHARACTERISTICS AS TRANSACTION READ ONLY",
+        "SET CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        "SET LOCAL CHARACTERISTICS AS TRANSACTION READ ONLY",
+        "SET LOCAL CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+        "SET GLOBAL CHARACTERISTICS AS TRANSACTION READ WRITE",
+        "SET GLOBAL CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+    ] {
+        assert!(pg_and_generic().parse_sql_statements(sql).is_err(), "{sql}");
+    }
+}
+
+#[test]
+fn set_session_characteristics_preserves_transaction_modes() {
+    let sql =
+        "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY";
+    let Statement::Set(Set::SetTransaction {
+        modes,
+        snapshot,
+        session,
+    }) = pg_and_generic().verified_stmt(sql)
+    else {
+        panic!("expected session transaction characteristics");
+    };
+    assert!(session);
+    assert!(snapshot.is_none());
+    assert_eq!(
+        modes,
+        vec![
+            TransactionMode::IsolationLevel(TransactionIsolationLevel::RepeatableRead),
+            TransactionMode::AccessMode(TransactionAccessMode::ReadOnly),
+        ]
+    );
+}
+
+#[test]
+fn set_session_characteristics_requires_transaction_mode() {
+    assert!(pg_and_generic()
+        .parse_sql_statements("SET SESSION CHARACTERISTICS AS TRANSACTION")
+        .is_err());
+}

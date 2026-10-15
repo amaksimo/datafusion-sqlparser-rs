@@ -15596,9 +15596,16 @@ impl<'a> Parser<'a> {
             }
             .into());
         } else if self.parse_keyword(Keyword::CHARACTERISTICS) {
+            if scope != Some(ContextModifier::Session) {
+                return self.expected_ref("SESSION before CHARACTERISTICS", self.peek_token_ref());
+            }
             self.expect_keywords(&[Keyword::AS, Keyword::TRANSACTION])?;
+            let modes = self.parse_transaction_modes()?;
+            if modes.is_empty() {
+                return self.expected_ref("a transaction mode", self.peek_token_ref());
+            }
             return Ok(Set::SetTransaction {
-                modes: self.parse_transaction_modes()?,
+                modes,
                 snapshot: None,
                 session: true,
             }
