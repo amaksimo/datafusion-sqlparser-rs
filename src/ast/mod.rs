@@ -4552,6 +4552,13 @@ pub enum Statement {
     /// GRANT privileges ON objects TO grantees
     /// ```
     Grant(Grant),
+    /// Aurora DSQL `AWS IAM GRANT` database-role mapping statement.
+    AwsIamGrant {
+        /// Database roles that the IAM principals can assume.
+        roles: Vec<Ident>,
+        /// IAM role or user ARN string literals.
+        arns: Vec<ValueWithSpan>,
+    },
     /// ```sql
     /// DENY privileges ON object TO grantees
     /// ```
@@ -4560,6 +4567,13 @@ pub enum Statement {
     /// REVOKE privileges ON objects FROM grantees
     /// ```
     Revoke(Revoke),
+    /// Aurora DSQL `AWS IAM REVOKE` database-role mapping statement.
+    AwsIamRevoke {
+        /// Database roles whose IAM-principal mappings are revoked.
+        roles: Vec<Ident>,
+        /// IAM role or user ARN string literals.
+        arns: Vec<ValueWithSpan>,
+    },
     /// ```sql
     /// DEALLOCATE [ PREPARE ] { name | ALL }
     /// ```
@@ -6070,8 +6084,20 @@ impl fmt::Display for Statement {
                 Ok(())
             }
             Statement::Grant(grant) => write!(f, "{grant}"),
+            Statement::AwsIamGrant { roles, arns } => write!(
+                f,
+                "AWS IAM GRANT {} TO {}",
+                display_comma_separated(roles),
+                display_comma_separated(arns)
+            ),
             Statement::Deny(s) => write!(f, "{s}"),
             Statement::Revoke(revoke) => write!(f, "{revoke}"),
+            Statement::AwsIamRevoke { roles, arns } => write!(
+                f,
+                "AWS IAM REVOKE {} FROM {}",
+                display_comma_separated(roles),
+                display_comma_separated(arns)
+            ),
             Statement::Deallocate { name, prepare } => write!(
                 f,
                 "DEALLOCATE {prepare}{name}",
