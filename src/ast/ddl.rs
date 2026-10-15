@@ -4483,6 +4483,35 @@ pub struct CreateView {
     pub to: Option<ObjectName>,
     /// MySQL: Optional parameters for the view algorithm, definer, and security context
     pub params: Option<CreateViewParams>,
+    /// PostgreSQL: `RECURSIVE` view modifier
+    /// <https://www.postgresql.org/docs/current/sql-createview.html>
+    pub recursive: bool,
+    /// PostgreSQL: `WITH [ CASCADED | LOCAL ] CHECK OPTION` clause
+    /// <https://www.postgresql.org/docs/current/sql-createview.html>
+    pub check_option: Option<ViewCheckOption>,
+}
+
+/// `WITH [ CASCADED | LOCAL ] CHECK OPTION` clause of `CREATE VIEW`.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum ViewCheckOption {
+    /// `WITH CHECK OPTION`
+    Unspecified,
+    /// `WITH CASCADED CHECK OPTION`
+    Cascaded,
+    /// `WITH LOCAL CHECK OPTION`
+    Local,
+}
+
+impl fmt::Display for ViewCheckOption {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ViewCheckOption::Unspecified => f.write_str("WITH CHECK OPTION"),
+            ViewCheckOption::Cascaded => f.write_str("WITH CASCADED CHECK OPTION"),
+            ViewCheckOption::Local => f.write_str("WITH LOCAL CHECK OPTION"),
+        }
+    }
 }
 
 impl fmt::Display for CreateView {
@@ -4498,7 +4527,7 @@ impl fmt::Display for CreateView {
         }
         write!(
             f,
-            "{secure}{materialized}{temporary}VIEW {if_not_and_name}{to}",
+            "{secure}{materialized}{temporary}{recursive}VIEW {if_not_and_name}{to}",
             if_not_and_name = if self.if_not_exists {
                 if self.name_before_not_exists {
                     format!("{} IF NOT EXISTS", self.name)
@@ -4515,6 +4544,7 @@ impl fmt::Display for CreateView {
                 ""
             },
             temporary = if self.temporary { "TEMPORARY " } else { "" },
+            recursive = if self.recursive { "RECURSIVE " } else { "" },
             to = self
                 .to
                 .as_ref()
@@ -4546,6 +4576,9 @@ impl fmt::Display for CreateView {
         f.write_str(" AS")?;
         SpaceOrNewline.fmt(f)?;
         self.query.fmt(f)?;
+        if let Some(check_option) = self.check_option {
+            write!(f, " {check_option}")?;
+        }
         if self.with_no_schema_binding {
             write!(f, " WITH NO SCHEMA BINDING")?;
         }
@@ -5915,5 +5948,250 @@ impl fmt::Display for AlterPolicy {
 impl From<AlterPolicy> for crate::ast::Statement {
     fn from(v: AlterPolicy) -> Self {
         crate::ast::Statement::AlterPolicy(v)
+    }
+}
+
+/// PostgreSQL `CREATE STATISTICS` statement.
+///
+/// <https://www.postgresql.org/docs/current/sql-createstatistics.html>
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub struct CreateStatistics {
+    /// `IF NOT EXISTS` was present (requires a name).
+    pub if_not_exists: bool,
+    /// Optional statistics object name.
+    pub name: Option<ObjectName>,
+    /// Statistics kinds, e.g. `ndistinct`, `dependencies`, `mcv`.
+    pub kinds: Vec<Ident>,
+    /// Columns or parenthesized expressions the statistics cover.
+    pub expressions: Vec<Expr>,
+    /// Table the statistics are built on.
+    #[cfg_attr(feature = "visitor", visit(with = "visit_relation"))]
+    pub table: ObjectName,
+}
+
+impl fmt::Display for CreateStatistics {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("CREATE STATISTICS")?;
+        if self.if_not_exists {
+            f.write_str(" IF NOT EXISTS")?;
+        }
+        if let Some(name) = &self.name {
+            write!(f, " {name}")?;
+        }
+        if !self.kinds.is_empty() {
+            write!(f, " ({})", display_comma_separated(&self.kinds))?;
+        }
+        write!(
+            f,
+            " ON {} FROM {}",
+            display_comma_separated(&self.expressions),
+            self.table
+        )
+    }
+}
+
+/// PostgreSQL `ALTER STATISTICS` statement.
+///
+/// <https://www.postgresql.org/docs/current/sql-alterstatistics.html>
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub struct AlterStatistics {
+    /// `IF EXISTS` was present (only with `SET STATISTICS`).
+    pub if_exists: bool,
+    /// Statistics object name.
+    pub name: ObjectName,
+    /// Change applied to the statistics object.
+    pub operation: AlterStatisticsOperation,
+}
+
+/// Change applied by an `ALTER STATISTICS` statement.
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterStatisticsOperation {
+    /// `OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }`
+    OwnerTo(Owner),
+    /// `RENAME TO new_name`
+    RenameTo(Ident),
+    /// `SET SCHEMA new_schema`
+    SetSchema(ObjectName),
+    /// `SET STATISTICS { new_target | DEFAULT }`; `None` is `DEFAULT`.
+    SetStatistics(Option<Expr>),
+}
+
+impl fmt::Display for AlterStatistics {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("ALTER STATISTICS ")?;
+        if self.if_exists {
+            f.write_str("IF EXISTS ")?;
+        }
+        write!(f, "{} ", self.name)?;
+        match &self.operation {
+            AlterStatisticsOperation::OwnerTo(owner) => write!(f, "OWNER TO {owner}"),
+            AlterStatisticsOperation::RenameTo(name) => write!(f, "RENAME TO {name}"),
+            AlterStatisticsOperation::SetSchema(schema) => write!(f, "SET SCHEMA {schema}"),
+            AlterStatisticsOperation::SetStatistics(Some(target)) => {
+                write!(f, "SET STATISTICS {target}")
+            }
+            AlterStatisticsOperation::SetStatistics(None) => f.write_str("SET STATISTICS DEFAULT"),
+        }
+    }
+}
+
+/// Change applied by a PostgreSQL `ALTER VIEW` statement.
+///
+/// <https://www.postgresql.org/docs/current/sql-alterview.html>
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterViewOperation {
+    /// `ALTER [ COLUMN ] column_name SET DEFAULT expression`
+    AlterColumnSetDefault {
+        /// `true` when the `COLUMN` keyword was present.
+        column_keyword: bool,
+        /// Column name.
+        column: Ident,
+        /// Default expression.
+        default: Expr,
+    },
+    /// `ALTER [ COLUMN ] column_name DROP DEFAULT`
+    AlterColumnDropDefault {
+        /// `true` when the `COLUMN` keyword was present.
+        column_keyword: bool,
+        /// Column name.
+        column: Ident,
+    },
+    /// `OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }`
+    OwnerTo(Owner),
+    /// `RENAME [ COLUMN ] column_name TO new_column_name`
+    RenameColumn {
+        /// `true` when the `COLUMN` keyword was present.
+        column_keyword: bool,
+        /// Current column name.
+        old_name: Ident,
+        /// New column name.
+        new_name: Ident,
+    },
+    /// `RENAME TO new_name`
+    RenameTo(Ident),
+    /// `SET SCHEMA new_schema`
+    SetSchema(ObjectName),
+    /// `SET ( view_option_name [= view_option_value] [, ... ] )`
+    SetOptions(Vec<SqlOption>),
+    /// `RESET ( view_option_name [, ... ] )`
+    ResetOptions(Vec<Ident>),
+}
+
+impl fmt::Display for AlterViewOperation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let column_kw = |present: bool| if present { "COLUMN " } else { "" };
+        match self {
+            AlterViewOperation::AlterColumnSetDefault {
+                column_keyword,
+                column,
+                default,
+            } => write!(
+                f,
+                "ALTER {}{column} SET DEFAULT {default}",
+                column_kw(*column_keyword)
+            ),
+            AlterViewOperation::AlterColumnDropDefault {
+                column_keyword,
+                column,
+            } => write!(
+                f,
+                "ALTER {}{column} DROP DEFAULT",
+                column_kw(*column_keyword)
+            ),
+            AlterViewOperation::OwnerTo(owner) => write!(f, "OWNER TO {owner}"),
+            AlterViewOperation::RenameColumn {
+                column_keyword,
+                old_name,
+                new_name,
+            } => write!(
+                f,
+                "RENAME {}{old_name} TO {new_name}",
+                column_kw(*column_keyword)
+            ),
+            AlterViewOperation::RenameTo(name) => write!(f, "RENAME TO {name}"),
+            AlterViewOperation::SetSchema(schema) => write!(f, "SET SCHEMA {schema}"),
+            AlterViewOperation::SetOptions(options) => {
+                write!(f, "SET ({})", display_comma_separated(options))
+            }
+            AlterViewOperation::ResetOptions(options) => {
+                write!(f, "RESET ({})", display_comma_separated(options))
+            }
+        }
+    }
+}
+
+/// PostgreSQL `ALTER SEQUENCE` statement.
+///
+/// <https://www.postgresql.org/docs/current/sql-altersequence.html>
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub struct AlterSequence {
+    /// `IF EXISTS` was present.
+    pub if_exists: bool,
+    /// Sequence name.
+    pub name: ObjectName,
+    /// Change applied to the sequence.
+    pub operation: AlterSequenceOperation,
+}
+
+/// Change applied by an `ALTER SEQUENCE` statement.
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSequenceOperation {
+    /// `[ AS data_type ]`, sequence options, and `[ OWNED BY ... ]`.
+    Options {
+        /// Optional `AS data_type`.
+        data_type: Option<DataType>,
+        /// Sequence options, including `RESTART`.
+        sequence_options: Vec<SequenceOptions>,
+        /// Optional `OWNED BY { table_name.column_name | NONE }`.
+        owned_by: Option<ObjectName>,
+    },
+    /// `OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }`
+    OwnerTo(Owner),
+    /// `RENAME TO new_name`
+    RenameTo(Ident),
+    /// `SET SCHEMA new_schema`
+    SetSchema(ObjectName),
+}
+
+impl fmt::Display for AlterSequence {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("ALTER SEQUENCE ")?;
+        if self.if_exists {
+            f.write_str("IF EXISTS ")?;
+        }
+        write!(f, "{}", self.name)?;
+        match &self.operation {
+            AlterSequenceOperation::Options {
+                data_type,
+                sequence_options,
+                owned_by,
+            } => {
+                if let Some(data_type) = data_type {
+                    write!(f, " AS {data_type}")?;
+                }
+                for option in sequence_options {
+                    write!(f, "{option}")?;
+                }
+                if let Some(owned_by) = owned_by {
+                    write!(f, " OWNED BY {owned_by}")?;
+                }
+                Ok(())
+            }
+            AlterSequenceOperation::OwnerTo(owner) => write!(f, " OWNER TO {owner}"),
+            AlterSequenceOperation::RenameTo(name) => write!(f, " RENAME TO {name}"),
+            AlterSequenceOperation::SetSchema(schema) => write!(f, " SET SCHEMA {schema}"),
+        }
     }
 }

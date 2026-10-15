@@ -65,24 +65,26 @@ pub use self::ddl::{
     AlterFunctionOperation, AlterIndexOperation, AlterOperator, AlterOperatorClass,
     AlterOperatorClassOperation, AlterOperatorFamily, AlterOperatorFamilyOperation,
     AlterOperatorOperation, AlterPolicy, AlterPolicyOperation, AlterSchema, AlterSchemaOperation,
-    AlterTable, AlterTableAlgorithm, AlterTableLock, AlterTableOperation, AlterTableType,
-    AlterType, AlterTypeAddValue, AlterTypeAddValuePosition, AlterTypeOperation, AlterTypeRename,
-    AlterTypeRenameValue, ClusteredBy, ColumnDef, ColumnOption, ColumnOptionDef, ColumnOptions,
-    ColumnPolicy, ColumnPolicyProperty, ConstraintCharacteristics, CreateCollation,
-    CreateCollationDefinition, CreateConnector, CreateDomain, CreateExtension, CreateFunction,
-    CreateIndex, CreateOperator, CreateOperatorClass, CreateOperatorFamily, CreatePolicy,
-    CreatePolicyCommand, CreatePolicyType, CreateTable, CreateTrigger, CreateView, Deduplicate,
-    DeferrableInitial, DistStyle, DropBehavior, DropExtension, DropFunction, DropOperator,
-    DropOperatorClass, DropOperatorFamily, DropOperatorSignature, DropPolicy, DropTrigger,
-    ForValues, FunctionReturnType, GeneratedAs, GeneratedExpressionMode, IdentityParameters,
-    IdentityProperty, IdentityPropertyFormatKind, IdentityPropertyKind, IdentityPropertyOrder,
-    IndexColumn, IndexOption, IndexType, KeyOrIndexDisplay, Msck, NullsDistinctOption,
-    OperatorArgTypes, OperatorClassItem, OperatorFamilyDropItem, OperatorFamilyItem,
-    OperatorOption, OperatorPurpose, Owner, Partition, PartitionBoundValue, ProcedureParam,
-    ReferentialAction, RenameTableNameKind, ReplicaIdentity, TagsColumnOption, TriggerObjectKind,
-    Truncate, UserDefinedTypeCompositeAttributeDef, UserDefinedTypeInternalLength,
-    UserDefinedTypeRangeOption, UserDefinedTypeRepresentation, UserDefinedTypeSqlDefinitionOption,
-    UserDefinedTypeStorage, ViewColumnDef, WithData,
+    AlterSequence, AlterSequenceOperation, AlterStatistics, AlterStatisticsOperation, AlterTable,
+    AlterTableAlgorithm, AlterTableLock, AlterTableOperation, AlterTableType, AlterType,
+    AlterTypeAddValue, AlterTypeAddValuePosition, AlterTypeOperation, AlterTypeRename,
+    AlterTypeRenameValue, AlterViewOperation, ClusteredBy, ColumnDef, ColumnOption,
+    ColumnOptionDef, ColumnOptions, ColumnPolicy, ColumnPolicyProperty, ConstraintCharacteristics,
+    CreateCollation, CreateCollationDefinition, CreateConnector, CreateDomain, CreateExtension,
+    CreateFunction, CreateIndex, CreateOperator, CreateOperatorClass, CreateOperatorFamily,
+    CreatePolicy, CreatePolicyCommand, CreatePolicyType, CreateStatistics, CreateTable,
+    CreateTrigger, CreateView, Deduplicate, DeferrableInitial, DistStyle, DropBehavior,
+    DropExtension, DropFunction, DropOperator, DropOperatorClass, DropOperatorFamily,
+    DropOperatorSignature, DropPolicy, DropTrigger, ForValues, FunctionReturnType, GeneratedAs,
+    GeneratedExpressionMode, IdentityParameters, IdentityProperty, IdentityPropertyFormatKind,
+    IdentityPropertyKind, IdentityPropertyOrder, IndexColumn, IndexOption, IndexType,
+    KeyOrIndexDisplay, Msck, NullsDistinctOption, OperatorArgTypes, OperatorClassItem,
+    OperatorFamilyDropItem, OperatorFamilyItem, OperatorOption, OperatorPurpose, Owner, Partition,
+    PartitionBoundValue, ProcedureParam, ReferentialAction, RenameTableNameKind, ReplicaIdentity,
+    TagsColumnOption, TriggerObjectKind, Truncate, UserDefinedTypeCompositeAttributeDef,
+    UserDefinedTypeInternalLength, UserDefinedTypeRangeOption, UserDefinedTypeRepresentation,
+    UserDefinedTypeSqlDefinitionOption, UserDefinedTypeStorage, ViewCheckOption, ViewColumnDef,
+    WithData,
 };
 pub use self::dml::{
     Delete, Insert, Merge, MergeAction, MergeClause, MergeClauseKind, MergeInsertExpr,
@@ -3822,6 +3824,34 @@ pub enum Statement {
     /// ```
     AlterType(AlterType),
     /// ```sql
+    /// ALTER VIEW [ IF EXISTS ] name { ALTER [ COLUMN ] ... | OWNER TO ... | RENAME ... | SET ... | RESET ... }
+    /// ```
+    /// See [PostgreSQL](https://www.postgresql.org/docs/current/sql-alterview.html)
+    AlterViewOperation {
+        /// `true` when `IF EXISTS` was present.
+        if_exists: bool,
+        /// View name being altered.
+        #[cfg_attr(feature = "visitor", visit(with = "visit_relation"))]
+        name: ObjectName,
+        /// Change applied to the view.
+        operation: AlterViewOperation,
+    },
+    /// ```sql
+    /// ALTER SEQUENCE
+    /// ```
+    /// See [PostgreSQL](https://www.postgresql.org/docs/current/sql-altersequence.html)
+    AlterSequence(AlterSequence),
+    /// ```sql
+    /// CREATE STATISTICS
+    /// ```
+    /// See [PostgreSQL](https://www.postgresql.org/docs/current/sql-createstatistics.html)
+    CreateStatistics(CreateStatistics),
+    /// ```sql
+    /// ALTER STATISTICS
+    /// ```
+    /// See [PostgreSQL](https://www.postgresql.org/docs/current/sql-alterstatistics.html)
+    AlterStatistics(AlterStatistics),
+    /// ```sql
     /// ALTER COLLATION
     /// ```
     /// See [PostgreSQL](https://www.postgresql.org/docs/current/sql-altercollation.html)
@@ -5637,6 +5667,18 @@ impl fmt::Display for Statement {
             Statement::AlterType(AlterType { name, operation }) => {
                 write!(f, "ALTER TYPE {name} {operation}")
             }
+            Statement::AlterViewOperation {
+                if_exists,
+                name,
+                operation,
+            } => write!(
+                f,
+                "ALTER VIEW {if_exists}{name} {operation}",
+                if_exists = if *if_exists { "IF EXISTS " } else { "" },
+            ),
+            Statement::AlterSequence(alter_sequence) => write!(f, "{alter_sequence}"),
+            Statement::CreateStatistics(create_statistics) => write!(f, "{create_statistics}"),
+            Statement::AlterStatistics(alter_statistics) => write!(f, "{alter_statistics}"),
             Statement::AlterCollation(alter_collation) => write!(f, "{alter_collation}"),
             Statement::AlterOperator(alter_operator) => write!(f, "{alter_operator}"),
             Statement::AlterOperatorFamily(alter_operator_family) => {
@@ -6539,6 +6581,8 @@ pub enum SequenceOptions {
     Cache(Expr),
     /// `CYCLE` or `NO CYCLE` option.
     Cycle(bool),
+    /// `ALTER SEQUENCE ... RESTART [ [ WITH ] <expr> ]`; second value indicates presence of `WITH`.
+    Restart(Option<Expr>, bool),
 }
 
 impl fmt::Display for SequenceOptions {
@@ -6578,6 +6622,14 @@ impl fmt::Display for SequenceOptions {
             SequenceOptions::Cycle(no) => {
                 write!(f, " {}CYCLE", if *no { "NO " } else { "" })
             }
+            SequenceOptions::Restart(restart, with) => match restart {
+                Some(restart) => write!(
+                    f,
+                    " RESTART{with} {restart}",
+                    with = if *with { " WITH" } else { "" }
+                ),
+                None => f.write_str(" RESTART"),
+            },
         }
     }
 }
@@ -8607,6 +8659,8 @@ pub enum ObjectType {
     Role,
     /// A sequence.
     Sequence,
+    /// An extended statistics object.
+    Statistics,
     /// A stage.
     Stage,
     /// A type definition.
@@ -8629,6 +8683,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Database => "DATABASE",
             ObjectType::Role => "ROLE",
             ObjectType::Sequence => "SEQUENCE",
+            ObjectType::Statistics => "STATISTICS",
             ObjectType::Stage => "STAGE",
             ObjectType::Type => "TYPE",
             ObjectType::User => "USER",
