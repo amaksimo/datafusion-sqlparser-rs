@@ -4552,6 +4552,10 @@ pub enum Statement {
     /// GRANT privileges ON objects TO grantees
     /// ```
     Grant(Grant),
+    AwsIamGrant {
+        roles: Vec<Ident>,
+        arns: Vec<ValueWithSpan>,
+    },
     /// ```sql
     /// DENY privileges ON object TO grantees
     /// ```
@@ -4560,6 +4564,10 @@ pub enum Statement {
     /// REVOKE privileges ON objects FROM grantees
     /// ```
     Revoke(Revoke),
+    AwsIamRevoke {
+        roles: Vec<Ident>,
+        arns: Vec<ValueWithSpan>,
+    },
     /// ```sql
     /// DEALLOCATE [ PREPARE ] { name | ALL }
     /// ```
@@ -6070,8 +6078,20 @@ impl fmt::Display for Statement {
                 Ok(())
             }
             Statement::Grant(grant) => write!(f, "{grant}"),
+            Statement::AwsIamGrant { roles, arns } => write!(
+                f,
+                "AWS IAM GRANT {} TO {}",
+                display_comma_separated(roles),
+                display_comma_separated(arns)
+            ),
             Statement::Deny(s) => write!(f, "{s}"),
             Statement::Revoke(revoke) => write!(f, "{revoke}"),
+            Statement::AwsIamRevoke { roles, arns } => write!(
+                f,
+                "AWS IAM REVOKE {} FROM {}",
+                display_comma_separated(roles),
+                display_comma_separated(arns)
+            ),
             Statement::Deallocate { name, prepare } => write!(
                 f,
                 "DEALLOCATE {prepare}{name}",

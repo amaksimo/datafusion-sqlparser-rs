@@ -169,6 +169,10 @@ impl Dialect for GenericDialect {
         true
     }
 
+    fn supports_aws_iam_statements(&self) -> bool {
+        true
+    }
+
     fn supports_load_extension(&self) -> bool {
         true
     }

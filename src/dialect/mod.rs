@@ -1219,6 +1219,10 @@ pub trait Dialect: Debug + Any {
         false
     }
 
+    fn supports_aws_iam_statements(&self) -> bool {
+        false
+    }
+
     /// Returns true if the dialect supports the `CREATE TABLE SELECT` statement
     fn supports_create_table_select(&self) -> bool {
         false

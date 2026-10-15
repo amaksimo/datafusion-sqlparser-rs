@@ -9513,3 +9513,177 @@ fn dsql_supported_create_schema_elements() {
         }
     }
 }
+
+#[test]
+fn dsql_aws_iam_grant_roundtrip() {
+    for sql in [
+        "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT app_role, reader TO 'arn:aws:iam::123456789012:role/app', 'arn:aws:iam::123456789012:user/reader'",
+        r#"AWS IAM GRANT "App Role", "Reader" TO 'arn:aws:iam::123456789012:role/app'"#,
+    ] {
+        pg_and_generic().verified_stmt(sql);
+    }
+}
+
+#[test]
+fn dsql_aws_iam_revoke_roundtrip() {
+    for sql in [
+        "AWS IAM REVOKE app_role FROM 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM REVOKE app_role, reader FROM 'arn:aws:iam::123456789012:role/app', 'arn:aws:iam::123456789012:user/reader'",
+        r#"AWS IAM REVOKE "App Role", "Reader" FROM 'arn:aws:iam::123456789012:role/app'"#,
+    ] {
+        pg_and_generic().verified_stmt(sql);
+    }
+}
+
+#[test]
+fn dsql_aws_iam_string_literal_roundtrip() {
+    for sql in [
+        "AWS IAM GRANT app_role TO E'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT app_role TO $arn$arn:aws:iam::123456789012:role/app$arn$",
+        "AWS IAM REVOKE app_role FROM U&'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/O''Brien'",
+        "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/a;--b'",
+    ] {
+        pg_and_generic().verified_stmt(sql);
+    }
+}
+
+#[test]
+fn dsql_aws_iam_keywords_case_and_comments() {
+    pg_and_generic().one_statement_parses_to(
+        r#"aws /* prefix */ iam grant "App" to
+           'arn:aws:iam::123456789012:role/app'"#,
+        r#"AWS IAM GRANT "App" TO 'arn:aws:iam::123456789012:role/app'"#,
+    );
+    pg_and_generic().statements_parse_to(
+        "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/app'; AWS IAM REVOKE app_role FROM 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/app'; AWS IAM REVOKE app_role FROM 'arn:aws:iam::123456789012:role/app'",
+    );
+}
+
+#[test]
+fn dsql_aws_iam_rejects_invalid_statements() {
+    for sql in [
+        "AWS GRANT app_role TO 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM SELECT app_role",
+        "AWS IAM app_role FROM 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM SELECT app_role FROM 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT app_role FROM 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM REVOKE app_role TO 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT TO 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT app_role, TO 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT app_role TO",
+        "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/app',",
+        "AWS IAM GRANT app_role TO 123",
+        "AWS IAM GRANT app_role TO NULL",
+        "AWS IAM GRANT app_role TO arn",
+        r#"AWS IAM GRANT app_role TO "arn:aws:iam::123456789012:role/app""#,
+        "AWS IAM GRANT app_role TO N'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/app' WITH GRANT OPTION",
+        r#""AWS" IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/app'"#,
+        r#"AWS "IAM" GRANT app_role TO 'arn:aws:iam::123456789012:role/app'"#,
+    ] {
+        assert!(pg_and_generic().parse_sql_statements(sql).is_err(), "{sql}");
+    }
+}
+
+#[test]
+fn dsql_aws_iam_rejects_other_dialects() {
+    use sqlparser::dialect::{AnsiDialect, MySqlDialect};
+    use sqlparser::parser::Parser;
+
+    for dialect in [
+        &AnsiDialect {} as &dyn sqlparser::dialect::Dialect,
+        &MySqlDialect {},
+    ] {
+        let sql = "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/app'";
+        assert!(Parser::parse_sql(dialect, sql).is_err(), "{dialect:?}");
+    }
+}
+
+#[test]
+fn dsql_aws_iam_words_remain_window_names() {
+    pg_and_generic()
+        .verified_stmt("SELECT sum(x) OVER (aws ORDER BY y) FROM t WINDOW aws AS (PARTITION BY z)");
+    pg_and_generic()
+        .verified_stmt("SELECT sum(x) OVER (iam) FROM t WINDOW iam AS (PARTITION BY z)");
+}
+
+#[test]
+fn dsql_aws_iam_rejects_string_role_names() {
+    for sql in [
+        "AWS IAM GRANT 'app_role' TO 'arn:aws:iam::123456789012:role/app'",
+        "AWS IAM REVOKE 'app_role' FROM 'arn:aws:iam::123456789012:role/app'",
+    ] {
+        assert!(pg_and_generic().parse_sql_statements(sql).is_err(), "{sql}");
+    }
+}
+
+#[test]
+fn dsql_aws_iam_grant_ast_preserves_lists() {
+    let sql = r#"AWS IAM GRANT "App Role", reader TO E'arn:aws:iam::123456789012:role/app', 'arn:aws:iam::123456789012:user/reader'"#;
+    let Statement::AwsIamGrant { roles, arns } = pg_and_generic().verified_stmt(sql) else {
+        panic!("expected AWS IAM GRANT");
+    };
+    assert_eq!(
+        roles,
+        vec![Ident::with_quote('"', "App Role"), Ident::new("reader")]
+    );
+    assert_eq!(arns.len(), 2);
+    assert_eq!(
+        arns[0].value,
+        Value::EscapedStringLiteral("arn:aws:iam::123456789012:role/app".into())
+    );
+    assert_eq!(
+        arns[1].value,
+        Value::SingleQuotedString("arn:aws:iam::123456789012:user/reader".into())
+    );
+}
+
+#[test]
+fn dsql_aws_iam_revoke_ast_preserves_lists() {
+    let sql = r#"AWS IAM REVOKE "App Role", reader FROM 'arn:aws:iam::123456789012:role/app', U&'arn:aws:iam::123456789012:user/reader'"#;
+    let Statement::AwsIamRevoke { roles, arns } = pg_and_generic().verified_stmt(sql) else {
+        panic!("expected AWS IAM REVOKE");
+    };
+    assert_eq!(
+        roles,
+        vec![Ident::with_quote('"', "App Role"), Ident::new("reader")]
+    );
+    assert_eq!(arns.len(), 2);
+    assert_eq!(
+        arns[0].value,
+        Value::SingleQuotedString("arn:aws:iam::123456789012:role/app".into())
+    );
+    assert_eq!(
+        arns[1].value,
+        Value::UnicodeStringLiteral("arn:aws:iam::123456789012:user/reader".into())
+    );
+}
+
+#[test]
+fn dsql_aws_iam_custom_dialect_opt_in() {
+    use sqlparser::dialect::Dialect;
+    use sqlparser::parser::Parser;
+
+    #[derive(Debug)]
+    struct IamDialect;
+    impl Dialect for IamDialect {
+        fn is_identifier_start(&self, ch: char) -> bool {
+            ch.is_ascii_alphabetic() || ch == '_'
+        }
+        fn is_identifier_part(&self, ch: char) -> bool {
+            ch.is_ascii_alphanumeric() || ch == '_'
+        }
+        fn supports_aws_iam_statements(&self) -> bool {
+            true
+        }
+    }
+
+    let sql = "AWS IAM GRANT app_role TO 'arn:aws:iam::123456789012:role/app'";
+    let statements = Parser::parse_sql(&IamDialect, sql).unwrap();
+    assert_eq!(statements.len(), 1);
+    assert!(matches!(statements[0], Statement::AwsIamGrant { .. }));
+    assert_eq!(statements[0].to_string(), sql);
+}

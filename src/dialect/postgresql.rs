@@ -222,6 +222,10 @@ impl Dialect for PostgreSqlDialect {
         true
     }
 
+    fn supports_aws_iam_statements(&self) -> bool {
+        true
+    }
+
     /// See <https://www.postgresql.org/docs/current/sql-load.html>
     fn supports_load_extension(&self) -> bool {
         true

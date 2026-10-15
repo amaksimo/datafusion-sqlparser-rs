@@ -658,6 +658,13 @@ impl<'a> Parser<'a> {
                 Keyword::SHOW => self.parse_show(),
                 Keyword::USE => self.parse_use(),
                 Keyword::GRANT => self.parse_grant().map(Into::into),
+                // Match by value to preserve `AWS` and `IAM` as unreserved identifiers.
+                Keyword::NoKeyword
+                    if self.dialect.supports_aws_iam_statements()
+                        && Self::is_unquoted_word(w, "AWS") =>
+                {
+                    self.parse_aws_iam()
+                }
                 Keyword::DENY => {
                     self.prev_token();
                     self.parse_deny()
@@ -1712,6 +1719,10 @@ impl<'a> Parser<'a> {
             }
             _ => Ok(Expr::Identifier(w.to_ident(w_span))),
         }
+    }
+
+    fn is_unquoted_word(word: &Word, expected: &str) -> bool {
+        word.quote_style.is_none() && word.value.eq_ignore_ascii_case(expected)
     }
 
     /// Returns true if the given [ObjectName] is a single unquoted
@@ -17480,6 +17491,38 @@ impl<'a> Parser<'a> {
         } else {
             Ok(JoinConstraint::None)
             //self.expected_ref("ON, or USING after JOIN", self.peek_token_ref())
+        }
+    }
+
+    fn parse_aws_iam(&mut self) -> Result<Statement, ParserError> {
+        match &self.peek_token_ref().token {
+            Token::Word(w) if Self::is_unquoted_word(w, "IAM") => self.advance_token(),
+            _ => return self.expected_ref("IAM", self.peek_token_ref()),
+        }
+        let grant = if self.parse_keyword(Keyword::GRANT) {
+            true
+        } else if self.parse_keyword(Keyword::REVOKE) {
+            false
+        } else {
+            return self.expected_ref("GRANT or REVOKE", self.peek_token_ref());
+        };
+        let roles = self.parse_comma_separated(|parser| match parser.peek_token_ref().token {
+            Token::Word(_) => parser.parse_identifier(),
+            _ => parser.expected_ref("a role name", parser.peek_token_ref()),
+        })?;
+        self.expect_keyword_is(if grant { Keyword::TO } else { Keyword::FROM })?;
+        let arns = self.parse_comma_separated(|parser| match parser.peek_token_ref().token {
+            Token::SingleQuotedString(_)
+            | Token::EscapedStringLiteral(_)
+            | Token::DollarQuotedString(_)
+            | Token::UnicodeStringLiteral(_) => parser.parse_value(),
+            _ => parser.expected_ref("a string literal", parser.peek_token_ref()),
+        })?;
+
+        if grant {
+            Ok(Statement::AwsIamGrant { roles, arns })
+        } else {
+            Ok(Statement::AwsIamRevoke { roles, arns })
         }
     }
 
